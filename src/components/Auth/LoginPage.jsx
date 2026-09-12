@@ -1,56 +1,73 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import './Auth.css'
+import './Login.css' // Yahan tum apni CSS file ka naam de sakte ho (jaise Auth.css ya Login.css)
 
 function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
 
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!email || !password) {
-      setError('Please fill in both fields.')
+      setError('Please fill in all fields to continue.')
       return
     }
-    // TODO: swap this for a real call once backend auth endpoint is ready
-    // fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
-    console.log('Login attempt:', { email, password })
-    navigate('/editor')
+    setError('')
+    setIsLoading(true)
+    
+    // Simulate network request
+    setTimeout(() => {
+      setIsLoading(false)
+      console.log('Login attempt:', { email, password })
+      navigate('/editor')
+    }, 800)
   }
 
   return (
-    <div className="auth-page">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <h1 className="auth-title">SyncDoc</h1>
-        <p className="auth-subtitle">Log in to continue</p>
+    <div className="login-page">
+      {/* Background glowing effects */}
+      <div className="login-glow-1"></div>
+      <div className="login-glow-2"></div>
 
-        {error && <p className="auth-error">{error}</p>}
+      <form className="login-card" onSubmit={handleSubmit}>
+        <div className="login-header-icon">SD</div>
+        <h1 className="login-title">Welcome back</h1>
+        <p className="login-subtitle">Log in to SyncDoc to continue</p>
 
-        <label className="auth-label" htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          className="auth-input"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-        />
+        {error && <div className="login-error">{error}</div>}
 
-        <label className="auth-label" htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          className="auth-input"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-        />
+        <div className="input-group">
+          <label className="login-label" htmlFor="email">Email Address</label>
+          <input
+            id="email"
+            type="email"
+            className="login-input"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+        </div>
 
-        <button type="submit" className="auth-button">Log In</button>
+        <div className="input-group">
+          <label className="login-label" htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            className="login-input"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+          />
+        </div>
 
-        <p className="auth-footer">
+        <button type="submit" className="login-button" disabled={isLoading}>
+          {isLoading ? <span className="spinner"></span> : 'Sign In'}
+        </button>
+
+        <p className="login-footer">
           Don't have an account? <Link to="/signup">Sign up</Link>
         </p>
       </form>
