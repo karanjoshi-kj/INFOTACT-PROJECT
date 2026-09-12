@@ -1,0 +1,10 @@
+.editor-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.editor-page-main {
+  flex: 1;
+  display: flex;
+}

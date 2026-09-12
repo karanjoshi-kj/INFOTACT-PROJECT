@@ -1,0 +1,23 @@
+.editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.editor-content {
+  flex: 1;
+  padding: 2rem 3rem;
+  min-height: 70vh;
+  background: var(--color-surface);
+  margin: 1.5rem 3rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-size: 1rem;
+  line-height: 1.6;
+  outline: none;
+}
+
+.editor-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+}

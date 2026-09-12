@@ -1,0 +1,46 @@
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.title-bar-logo {
+  font-weight: 700;
+  color: var(--color-primary);
+  font-size: 1.1rem;
+}
+
+.title-bar-doc-title {
+  font-size: 1.05rem;
+  font-weight: 500;
+  margin: 0;
+  cursor: text;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.title-bar-doc-title:hover {
+  background: var(--color-bg);
+}
+
+.title-bar-input {
+  font-size: 1.05rem;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+}
+
+.title-bar-status {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}

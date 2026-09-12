@@ -1,11 +1,19 @@
-import React from 'react'
-import Hello from './components/Hello';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import LoginPage from './components/Auth/LoginPage.jsx'
+import SignupPage from './components/Auth/SignupPage.jsx'
+import EditorPage from './pages/EditorPage.jsx'
+import './App.css'
 
-const App = () => {
+function App() {
   return (
-    <div>
-      <Hello/>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/editor" element={<EditorPage />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
