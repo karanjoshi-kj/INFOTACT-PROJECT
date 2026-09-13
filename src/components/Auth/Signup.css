@@ -7,7 +7,7 @@
   font-family: 'Inter', sans-serif;
 }
 
-.login-page {
+.signup-page {
   min-height: 100vh;
   width: 100%;
   display: flex;
@@ -23,22 +23,9 @@
   padding: 24px;
 }
 
-/* Glowing blobs — added a third for more depth */
-.login-glow-1 {
+.signup-glow-1 {
   position: absolute;
   top: -120px;
-  left: -120px;
-  width: 480px;
-  height: 480px;
-  background: rgba(99, 102, 241, 0.28);
-  filter: blur(120px);
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.login-glow-2 {
-  position: absolute;
-  bottom: -120px;
   right: -120px;
   width: 480px;
   height: 480px;
@@ -48,7 +35,19 @@
   pointer-events: none;
 }
 
-.login-page::after {
+.signup-glow-2 {
+  position: absolute;
+  bottom: -120px;
+  left: -120px;
+  width: 480px;
+  height: 480px;
+  background: rgba(99, 102, 241, 0.28);
+  filter: blur(120px);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.signup-page::after {
   content: '';
   position: absolute;
   top: 40%;
@@ -62,8 +61,7 @@
   pointer-events: none;
 }
 
-/* Bigger, more premium card */
-.login-card {
+.signup-card {
   width: 100%;
   max-width: 480px;
   background: rgba(30, 41, 59, 0.65);
@@ -80,7 +78,7 @@
   color: #ffffff;
 }
 
-.login-header-icon {
+.signup-header-icon {
   width: 64px;
   height: 64px;
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 60%, #3b82f6 100%);
@@ -96,21 +94,21 @@
   box-shadow: 0 12px 24px -6px rgba(99, 102, 241, 0.55);
 }
 
-.login-title {
+.signup-title {
   font-size: 32px;
   font-weight: 800;
   color: #ffffff;
   letter-spacing: -0.7px;
 }
 
-.login-subtitle {
+.signup-subtitle {
   font-size: 15px;
   color: #94a3b8;
   margin-top: 8px;
   margin-bottom: 36px;
 }
 
-.login-error {
+.signup-error {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
   color: #f87171;
@@ -121,11 +119,17 @@
   text-align: center;
 }
 
+.input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
 .input-group {
   margin-bottom: 24px;
 }
 
-.login-label {
+.signup-label {
   display: block;
   font-size: 12px;
   font-weight: 600;
@@ -135,7 +139,7 @@
   margin-bottom: 10px;
 }
 
-.login-input {
+.signup-input {
   width: 100%;
   padding: 16px 18px;
   background: rgba(15, 23, 42, 0.85);
@@ -147,17 +151,17 @@
   transition: all 0.2s ease;
 }
 
-.login-input::placeholder {
+.signup-input::placeholder {
   color: #64748b;
 }
 
-.login-input:focus {
+.signup-input:focus {
   border-color: #6366f1;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.22);
   background: rgba(15, 23, 42, 0.95);
 }
 
-.login-button {
+.signup-button {
   width: 100%;
   margin-top: 12px;
   padding: 17px;
@@ -176,17 +180,17 @@
   justify-content: center;
 }
 
-.login-button:hover {
+.signup-button:hover {
   background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
   transform: translateY(-2px);
   box-shadow: 0 18px 34px -6px rgba(99, 102, 241, 0.65);
 }
 
-.login-button:active {
+.signup-button:active {
   transform: translateY(0);
 }
 
-.login-button:disabled {
+.signup-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
@@ -205,32 +209,34 @@
   to { transform: rotate(360deg); }
 }
 
-.login-footer {
+.signup-footer {
   text-align: center;
   font-size: 14.5px;
   color: #94a3b8;
   margin-top: 32px;
 }
 
-.login-footer a {
+.signup-footer a {
   color: #818cf8;
   text-decoration: none;
   font-weight: 600;
   transition: color 0.2s;
 }
 
-.login-footer a:hover {
+.signup-footer a:hover {
   color: #a5b4fc;
   text-decoration: underline;
 }
 
-/* Small screens: card still breathes nicely */
 @media (max-width: 520px) {
-  .login-card {
+  .signup-card {
     padding: 40px 28px;
     border-radius: 22px;
   }
-  .login-title {
+  .signup-title {
     font-size: 26px;
+  }
+  .input-row {
+    grid-template-columns: 1fr;
   }
 }

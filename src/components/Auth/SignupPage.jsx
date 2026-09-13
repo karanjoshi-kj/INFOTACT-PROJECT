@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import './Auth.css'
+import './Signup.css'
 
 function SignupPage() {
   const [name, setName] = useState('')
@@ -8,6 +8,7 @@ function SignupPage() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
 
   const handleSubmit = (e) => {
@@ -20,63 +21,86 @@ function SignupPage() {
       setError('Passwords do not match.')
       return
     }
+    setError('')
+    setIsLoading(true)
+
     // TODO: swap this for a real call once backend auth endpoint is ready
     // fetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) })
-    console.log('Signup attempt:', { name, email, password })
-    navigate('/editor')
+    setTimeout(() => {
+      setIsLoading(false)
+      console.log('Signup attempt:', { name, email, password })
+      navigate('/editor')
+    }, 800)
   }
 
   return (
-    <div className="auth-page">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <h1 className="auth-title">SyncDoc</h1>
-        <p className="auth-subtitle">Create your account</p>
+    <div className="signup-page">
+      {/* Background glowing effects */}
+      <div className="signup-glow-1"></div>
+      <div className="signup-glow-2"></div>
 
-        {error && <p className="auth-error">{error}</p>}
+      <form className="signup-card" onSubmit={handleSubmit}>
+        <div className="signup-header-icon">SD</div>
+        <h1 className="signup-title">Create your account</h1>
+        <p className="signup-subtitle">Join SyncDoc and start collaborating</p>
 
-        <label className="auth-label" htmlFor="name">Full Name</label>
-        <input
-          id="name"
-          type="text"
-          className="auth-input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Jane Doe"
-        />
+        {error && <div className="signup-error">{error}</div>}
 
-        <label className="auth-label" htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          className="auth-input"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-        />
+        <div className="input-group">
+          <label className="signup-label" htmlFor="name">Full Name</label>
+          <input
+            id="name"
+            type="text"
+            className="signup-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Jane Doe"
+          />
+        </div>
 
-        <label className="auth-label" htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          className="auth-input"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-        />
+        <div className="input-group">
+          <label className="signup-label" htmlFor="email">Email Address</label>
+          <input
+            id="email"
+            type="email"
+            className="signup-input"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+        </div>
 
-        <label className="auth-label" htmlFor="confirmPassword">Confirm Password</label>
-        <input
-          id="confirmPassword"
-          type="password"
-          className="auth-input"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder="••••••••"
-        />
+        <div className="input-row">
+          <div className="input-group">
+            <label className="signup-label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              className="signup-input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
 
-        <button type="submit" className="auth-button">Sign Up</button>
+          <div className="input-group">
+            <label className="signup-label" htmlFor="confirmPassword">Confirm</label>
+            <input
+              id="confirmPassword"
+              type="password"
+              className="signup-input"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
+        </div>
 
-        <p className="auth-footer">
+        <button type="submit" className="signup-button" disabled={isLoading}>
+          {isLoading ? <span className="spinner"></span> : 'Create Account'}
+        </button>
+
+        <p className="signup-footer">
           Already have an account? <Link to="/login">Log in</Link>
         </p>
       </form>
