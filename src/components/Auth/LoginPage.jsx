@@ -19,6 +19,7 @@ const EyeOffIcon = () => (
 function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -36,7 +37,7 @@ function LoginPage() {
     // Simulate network request
     setTimeout(() => {
       setIsLoading(false)
-      console.log('Login attempt:', { email, password })
+      console.log('Login attempt:', { email, password, rememberMe })
       navigate('/editor')
     }, 800)
   }
@@ -63,6 +64,7 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              disabled={isLoading}
             />
           </div>
         </div>
@@ -80,16 +82,31 @@ function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
+              disabled={isLoading}
             />
             <button
               type="button"
               className="login-eye-btn"
               onClick={() => setShowPassword((v) => !v)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
+              disabled={isLoading}
             >
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
+        </div>
+
+        {/* Remember Me Checkbox */}
+        <div className="login-remember-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px', color: '#94a3b8' }}>
+          <input
+            type="checkbox"
+            id="remember"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            disabled={isLoading}
+            style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
+          />
+          <label htmlFor="remember" style={{ cursor: 'pointer' }}>Remember me for 30 days</label>
         </div>
 
         <button type="submit" className="login-button" disabled={isLoading}>
