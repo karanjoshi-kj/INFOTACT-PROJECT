@@ -75,7 +75,18 @@ function SignupPage() {
       <div className="signup-glow-1"></div>
       <div className="signup-glow-2"></div>
 
+      {/* Floating neon / phantom-green boxes drifting behind the card */}
+      <div className="signup-float-box fb-1"></div>
+      <div className="signup-float-box fb-2"></div>
+      <div className="signup-float-box fb-3"></div>
+      <div className="signup-float-box fb-4"></div>
+      <div className="signup-float-box fb-5"></div>
+      <div className="signup-float-box fb-6"></div>
+      <div className="signup-float-box fb-7"></div>
+      <div className="signup-float-box fb-8"></div>
+
       <div className="signup-card-wrapper">
+        <div className="signup-corner-tab"></div>
         <form className="signup-card" onSubmit={handleSubmit}>
           <div className="signup-header-icon">SD</div>
           <div className="signup-title-bar"></div>
