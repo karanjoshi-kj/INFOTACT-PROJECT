@@ -47,76 +47,89 @@ function LoginPage() {
       <div className="login-glow-1"></div>
       <div className="login-glow-2"></div>
 
-      <form className="login-card" onSubmit={handleSubmit}>
-        <div className="login-header-icon">SD</div>
-        <h1 className="login-title">Welcome back</h1>
-        <p className="login-subtitle">Log in to SyncDoc to continue</p>
+      {/* Floating indigo/blue boxes drifting behind the card */}
+      <div className="login-float-box lb-1"></div>
+      <div className="login-float-box lb-2"></div>
+      <div className="login-float-box lb-3"></div>
+      <div className="login-float-box lb-4"></div>
+      <div className="login-float-box lb-5"></div>
+      <div className="login-float-box lb-6"></div>
+      <div className="login-float-box lb-7"></div>
+      <div className="login-float-box lb-8"></div>
 
-        {error && <div className="login-error">{error}</div>}
+      <div className="login-card-wrapper">
+        <div className="login-corner-tab"></div>
+        <form className="login-card" onSubmit={handleSubmit}>
+          <div className="login-header-icon">SD</div>
+          <h1 className="login-title">Welcome back</h1>
+          <p className="login-subtitle">Log in to SyncDoc to continue</p>
 
-        <div className="input-group">
-          <label className="login-label" htmlFor="email">Email Address</label>
-          <div className="login-input-wrapper">
+          {error && <div className="login-error">{error}</div>}
+
+          <div className="input-group">
+            <label className="login-label" htmlFor="email">Email Address</label>
+            <div className="login-input-wrapper">
+              <input
+                id="email"
+                type="email"
+                className="login-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+
+          <div className="input-group">
+            <div className="login-label-row">
+              <label className="login-label" htmlFor="password">Password</label>
+              <Link to="/forgot-password" className="login-forgot-link">Forgot password?</Link>
+            </div>
+            <div className="login-input-wrapper">
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                className="login-input has-toggle"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                className="login-eye-btn"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                disabled={isLoading}
+              >
+                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+              </button>
+            </div>
+          </div>
+
+          {/* Remember Me Checkbox */}
+          <div className="login-remember-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px', color: '#94a3b8' }}>
             <input
-              id="email"
-              type="email"
-              className="login-input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              type="checkbox"
+              id="remember"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
               disabled={isLoading}
+              style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
             />
+            <label htmlFor="remember" style={{ cursor: 'pointer' }}>Remember me for 30 days</label>
           </div>
-        </div>
 
-        <div className="input-group">
-          <div className="login-label-row">
-            <label className="login-label" htmlFor="password">Password</label>
-            <Link to="/forgot-password" className="login-forgot-link">Forgot password?</Link>
-          </div>
-          <div className="login-input-wrapper">
-            <input
-              id="password"
-              type={showPassword ? 'text' : 'password'}
-              className="login-input has-toggle"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              disabled={isLoading}
-            />
-            <button
-              type="button"
-              className="login-eye-btn"
-              onClick={() => setShowPassword((v) => !v)}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-              disabled={isLoading}
-            >
-              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-            </button>
-          </div>
-        </div>
+          <button type="submit" className="login-button" disabled={isLoading}>
+            {isLoading ? <span className="spinner"></span> : 'Sign In'}
+          </button>
 
-        {/* Remember Me Checkbox */}
-        <div className="login-remember-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px', color: '#94a3b8' }}>
-          <input
-            type="checkbox"
-            id="remember"
-            checked={rememberMe}
-            onChange={(e) => setRememberMe(e.target.checked)}
-            disabled={isLoading}
-            style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
-          />
-          <label htmlFor="remember" style={{ cursor: 'pointer' }}>Remember me for 30 days</label>
-        </div>
-
-        <button type="submit" className="login-button" disabled={isLoading}>
-          {isLoading ? <span className="spinner"></span> : 'Sign In'}
-        </button>
-
-        <p className="login-footer">
-          Don't have an account? <Link to="/signup">Sign up</Link>
-        </p>
-      </form>
+          <p className="login-footer">
+            Don't have an account? <Link to="/signup">Sign up</Link>
+          </p>
+        </form>
+      </div>
     </div>
   )
 }
