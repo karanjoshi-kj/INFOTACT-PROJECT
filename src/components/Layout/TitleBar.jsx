@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import './TitleBar.css'
 
-function TitleBar({ title, onTitleChange }) {
+function TitleBar({ title, onTitleChange, saveStatus }) {
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
 
@@ -9,6 +9,10 @@ function TitleBar({ title, onTitleChange }) {
     setEditing(false)
     onTitleChange(localTitle.trim() || 'Untitled Document')
   }
+
+  const isSaved = saveStatus === 'All changes saved'
+  const isSaving = saveStatus === 'Saving...'
+  const statusClass = isSaved ? 'is-saved' : isSaving ? 'is-saving' : 'is-unsaved'
 
   return (
     <header className="title-bar">
@@ -30,8 +34,10 @@ function TitleBar({ title, onTitleChange }) {
         )}
       </div>
       <div className="title-bar-right">
-        {/* Placeholder — active-user avatars get added in Week 2 sync work */}
-        <span className="title-bar-status">● Local draft</span>
+        <span className={`title-bar-status ${statusClass}`}>
+          <span className="title-bar-status-dot"></span>
+          {saveStatus}
+        </span>
       </div>
     </header>
   )

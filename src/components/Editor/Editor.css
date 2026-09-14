@@ -15,9 +15,36 @@
   font-size: 1rem;
   line-height: 1.6;
   outline: none;
+  transition: box-shadow 0.15s ease;
+}
+
+.editor-content:focus {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15), var(--shadow-sm);
 }
 
 .editor-content:empty::before {
   content: attr(data-placeholder);
   color: var(--color-text-muted);
+}
+
+.editor-content h1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin: 0.6em 0 0.3em;
+}
+
+.editor-content h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.6em 0 0.3em;
+}
+
+.editor-content ul,
+.editor-content ol {
+  margin: 0.4em 0;
+  padding-left: 1.6em;
+}
+
+.editor-content li {
+  margin: 0.2em 0;
 }
