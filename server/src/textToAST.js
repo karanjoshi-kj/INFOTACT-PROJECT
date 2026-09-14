@@ -6,8 +6,9 @@ function textToAST(typedText) {
 
   const paragraphs = typedText.split("\n");
 
-  paragraphs.forEach((paragraphText) => {
+  paragraphs.forEach((paragraphText, index) => {
     const paragraphNode = {
+      id: `p${index + 1}`,
       type: "paragraph",
       children: []
     };
@@ -41,4 +42,5 @@ function textToAST(typedText) {
 
   return documentTree;
 }
+
 module.exports = textToAST;
