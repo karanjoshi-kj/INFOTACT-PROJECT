@@ -47,16 +47,6 @@ function LoginPage() {
       <div className="login-glow-1"></div>
       <div className="login-glow-2"></div>
 
-      {/* Floating indigo/blue boxes drifting behind the card */}
-      <div className="login-float-box lb-1"></div>
-      <div className="login-float-box lb-2"></div>
-      <div className="login-float-box lb-3"></div>
-      <div className="login-float-box lb-4"></div>
-      <div className="login-float-box lb-5"></div>
-      <div className="login-float-box lb-6"></div>
-      <div className="login-float-box lb-7"></div>
-      <div className="login-float-box lb-8"></div>
-
       <div className="login-card-wrapper">
         <div className="login-corner-tab"></div>
         <form className="login-card" onSubmit={handleSubmit}>
@@ -108,7 +98,6 @@ function LoginPage() {
             </div>
           </div>
 
-          {/* Remember Me Checkbox */}
           <div className="login-remember-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px', color: '#94a3b8' }}>
             <input
               type="checkbox"

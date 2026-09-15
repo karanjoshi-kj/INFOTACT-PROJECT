@@ -2,27 +2,6 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import './Signup.css'
 
-const UserIcon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-    <circle cx="12" cy="7" r="4" />
-  </svg>
-)
-
-const MailIcon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="4" width="20" height="16" rx="2" />
-    <path d="m22 6-10 7L2 6" />
-  </svg>
-)
-
-const LockIcon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="11" width="18" height="11" rx="2" />
-    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </svg>
-)
-
 const EyeIcon = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -75,21 +54,10 @@ function SignupPage() {
       <div className="signup-glow-1"></div>
       <div className="signup-glow-2"></div>
 
-      {/* Floating neon / phantom-green boxes drifting behind the card */}
-      <div className="signup-float-box fb-1"></div>
-      <div className="signup-float-box fb-2"></div>
-      <div className="signup-float-box fb-3"></div>
-      <div className="signup-float-box fb-4"></div>
-      <div className="signup-float-box fb-5"></div>
-      <div className="signup-float-box fb-6"></div>
-      <div className="signup-float-box fb-7"></div>
-      <div className="signup-float-box fb-8"></div>
-
       <div className="signup-card-wrapper">
         <div className="signup-corner-tab"></div>
         <form className="signup-card" onSubmit={handleSubmit}>
           <div className="signup-header-icon">SD</div>
-          <div className="signup-title-bar"></div>
           <h1 className="signup-title">Create Account</h1>
           <p className="signup-subtitle">Join SyncDoc and start collaborating</p>
 
@@ -98,7 +66,6 @@ function SignupPage() {
           <div className="input-group">
             <label className="signup-label" htmlFor="name">Full Name</label>
             <div className="signup-input-wrapper">
-              <span className="signup-input-icon"><UserIcon /></span>
               <input
                 id="name"
                 type="text"
@@ -106,6 +73,7 @@ function SignupPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Jane Doe"
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -113,7 +81,6 @@ function SignupPage() {
           <div className="input-group">
             <label className="signup-label" htmlFor="email">Email Address</label>
             <div className="signup-input-wrapper">
-              <span className="signup-input-icon"><MailIcon /></span>
               <input
                 id="email"
                 type="email"
@@ -121,6 +88,7 @@ function SignupPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -129,7 +97,6 @@ function SignupPage() {
             <div className="input-group">
               <label className="signup-label" htmlFor="password">Password</label>
               <div className="signup-input-wrapper">
-                <span className="signup-input-icon"><LockIcon /></span>
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
@@ -137,12 +104,14 @@ function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   className="signup-eye-btn"
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  disabled={isLoading}
                 >
                   {showPassword ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
@@ -152,7 +121,6 @@ function SignupPage() {
             <div className="input-group">
               <label className="signup-label" htmlFor="confirmPassword">Confirm</label>
               <div className="signup-input-wrapper">
-                <span className="signup-input-icon"><LockIcon /></span>
                 <input
                   id="confirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
@@ -160,12 +128,14 @@ function SignupPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   className="signup-eye-btn"
                   onClick={() => setShowConfirmPassword((v) => !v)}
                   aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  disabled={isLoading}
                 >
                   {showConfirmPassword ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
@@ -177,9 +147,9 @@ function SignupPage() {
             {isLoading ? <span className="spinner"></span> : 'Create Account'}
           </button>
 
-          <div className="signup-footer-box">
+          <p className="signup-footer">
             Already have an account? <Link to="/login">Log in</Link>
-          </div>
+          </p>
         </form>
       </div>
     </div>
