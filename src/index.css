@@ -10,6 +10,17 @@
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
 }
 
+:root[data-theme='dark'] {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-border: #334155;
+  --color-primary: #6366f1;
+  --color-primary-hover: #818cf8;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -19,6 +30,7 @@ body {
   font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
   background: var(--color-bg);
   color: var(--color-text);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
