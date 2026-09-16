@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TitleBar from '../components/Layout/TitleBar.jsx'
 import Editor from '../components/Editor/Editor.jsx'
 import './EditorPage.css'
@@ -23,19 +23,35 @@ const MoonIcon = () => (
   </svg>
 )
 
+const getInitialTheme = () => {
+  const stored = localStorage.getItem('syncdoc-theme')
+  return stored === 'dark' ? 'dark' : 'light'
+}
+
 function EditorPage() {
   const [title, setTitle] = useState('Untitled Document')
   const [content, setContent] = useState('')
   const [saveStatus, setSaveStatus] = useState('All changes saved')
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
-  const [theme, setTheme] = useState(() => localStorage.getItem('syncdoc-theme') || 'light')
+  const [theme, setTheme] = useState(getInitialTheme)
+
+  const debounceTimerRef = useRef(null)
+  const savingTimerRef = useRef(null)
 
   // Apply theme to the whole document and remember the choice
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('syncdoc-theme', theme)
   }, [theme])
+
+  // Clear any pending auto-save timers if the page unmounts mid-sequence
+  useEffect(() => {
+    return () => {
+      clearTimeout(debounceTimerRef.current)
+      clearTimeout(savingTimerRef.current)
+    }
+  }, [])
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
@@ -52,10 +68,12 @@ function EditorPage() {
     setCharCount(newContent.length)
 
     // Simulate auto-save after 1 second of inactivity
-    clearTimeout(window.saveTimer)
-    window.saveTimer = setTimeout(() => {
+    clearTimeout(debounceTimerRef.current)
+    clearTimeout(savingTimerRef.current)
+
+    debounceTimerRef.current = setTimeout(() => {
       setSaveStatus('Saving...')
-      setTimeout(() => {
+      savingTimerRef.current = setTimeout(() => {
         setSaveStatus('All changes saved')
       }, 600)
     }, 1000)
@@ -66,25 +84,27 @@ function EditorPage() {
       <TitleBar
         title={title}
         onTitleChange={setTitle}
-        saveStatus={saveStatus}
       />
 
       <main className="editor-page-main">
         <div className="editor-container">
-          {/* Editor component ko content aur handler pass kar rahe hain */}
+          {/* Passing content and the change handler down to the Editor component */}
           <Editor value={content} onChange={handleContentChange} />
         </div>
       </main>
 
-      {/* Professional Footer with stats */}
+      {/* Footer with stats and save-status tracker */}
       <footer className="editor-footer">
         <div className="editor-stats">
           <span>{wordCount} words</span>
           <span>•</span>
           <span>{charCount} characters</span>
         </div>
-        <div className="editor-sync-indicator">
-          <span className={`status-dot ${saveStatus === 'All changes saved' ? 'saved' : 'saving'}`}></span>
+        <div className="editor-sync-indicator" aria-live="polite">
+          <span
+            className={`status-dot ${saveStatus === 'All changes saved' ? 'saved' : 'saving'}`}
+            aria-hidden="true"
+          ></span>
           <span>{saveStatus}</span>
         </div>
       </footer>
