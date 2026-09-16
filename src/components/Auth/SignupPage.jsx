@@ -16,6 +16,9 @@ const EyeOffIcon = () => (
   </svg>
 )
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MIN_PASSWORD_LENGTH = 8
+
 function SignupPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -29,22 +32,38 @@ function SignupPage() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!name || !email || !password || !confirmPassword) {
+
+    const trimmedName = name.trim()
+    const trimmedEmail = email.trim()
+
+    if (!trimmedName || !trimmedEmail || !password || !confirmPassword) {
       setError('Please fill in all fields.')
       return
     }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`)
+      return
+    }
+
     if (password !== confirmPassword) {
       setError('Passwords do not match.')
       return
     }
+
     setError('')
     setIsLoading(true)
 
     // TODO: swap this for a real call once backend auth endpoint is ready
-    // fetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) })
+    // fetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name: trimmedName, email: trimmedEmail, password }) })
     setTimeout(() => {
       setIsLoading(false)
-      console.log('Signup attempt:', { name, email, password })
+      console.log('Signup attempt:', { name: trimmedName, email: trimmedEmail })
       navigate('/editor')
     }, 800)
   }
@@ -56,12 +75,16 @@ function SignupPage() {
 
       <div className="signup-card-wrapper">
         <div className="signup-corner-tab"></div>
-        <form className="signup-card" onSubmit={handleSubmit}>
+        <form className="signup-card" onSubmit={handleSubmit} noValidate>
           <div className="signup-header-icon">SD</div>
           <h1 className="signup-title">Create Account</h1>
           <p className="signup-subtitle">Join SyncDoc and start collaborating</p>
 
-          {error && <div className="signup-error">{error}</div>}
+          {error && (
+            <div className="signup-error" role="alert" aria-live="polite">
+              {error}
+            </div>
+          )}
 
           <div className="input-group">
             <label className="signup-label" htmlFor="name">Full Name</label>
@@ -74,6 +97,10 @@ function SignupPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Jane Doe"
                 disabled={isLoading}
+                autoComplete="name"
+                autoFocus
+                required
+                aria-invalid={!!error}
               />
             </div>
           </div>
@@ -89,6 +116,9 @@ function SignupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 disabled={isLoading}
+                autoComplete="email"
+                required
+                aria-invalid={!!error}
               />
             </div>
           </div>
@@ -105,6 +135,10 @@ function SignupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   disabled={isLoading}
+                  autoComplete="new-password"
+                  required
+                  minLength={MIN_PASSWORD_LENGTH}
+                  aria-invalid={!!error}
                 />
                 <button
                   type="button"
@@ -129,6 +163,10 @@ function SignupPage() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   disabled={isLoading}
+                  autoComplete="new-password"
+                  required
+                  minLength={MIN_PASSWORD_LENGTH}
+                  aria-invalid={!!error}
                 />
                 <button
                   type="button"
