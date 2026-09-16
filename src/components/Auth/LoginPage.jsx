@@ -16,6 +16,8 @@ const EyeOffIcon = () => (
   </svg>
 )
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,17 +29,26 @@ function LoginPage() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!email || !password) {
+
+    const trimmedEmail = email.trim()
+
+    if (!trimmedEmail || !password) {
       setError('Please fill in all fields to continue.')
       return
     }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+
     setError('')
     setIsLoading(true)
 
     // Simulate network request
     setTimeout(() => {
       setIsLoading(false)
-      console.log('Login attempt:', { email, password, rememberMe })
+      console.log('Login attempt:', { email: trimmedEmail, rememberMe })
       navigate('/editor')
     }, 800)
   }
@@ -49,12 +60,16 @@ function LoginPage() {
 
       <div className="login-card-wrapper">
         <div className="login-corner-tab"></div>
-        <form className="login-card" onSubmit={handleSubmit}>
+        <form className="login-card" onSubmit={handleSubmit} noValidate>
           <div className="login-header-icon">SD</div>
           <h1 className="login-title">Welcome back</h1>
           <p className="login-subtitle">Log in to SyncDoc to continue</p>
 
-          {error && <div className="login-error">{error}</div>}
+          {error && (
+            <div className="login-error" role="alert" aria-live="polite">
+              {error}
+            </div>
+          )}
 
           <div className="input-group">
             <label className="login-label" htmlFor="email">Email Address</label>
@@ -67,6 +82,11 @@ function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 disabled={isLoading}
+                autoComplete="email"
+                autoFocus
+                required
+                aria-invalid={!!error}
+                aria-describedby={error ? 'login-error-msg' : undefined}
               />
             </div>
           </div>
@@ -85,6 +105,9 @@ function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 disabled={isLoading}
+                autoComplete="current-password"
+                required
+                aria-invalid={!!error}
               />
               <button
                 type="button"
@@ -98,16 +121,16 @@ function LoginPage() {
             </div>
           </div>
 
-          <div className="login-remember-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '13px', color: '#94a3b8' }}>
+          <div className="login-remember-row">
             <input
               type="checkbox"
               id="remember"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
               disabled={isLoading}
-              style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
+              autoComplete="off"
             />
-            <label htmlFor="remember" style={{ cursor: 'pointer' }}>Remember me for 30 days</label>
+            <label htmlFor="remember">Remember me for 30 days</label>
           </div>
 
           <button type="submit" className="login-button" disabled={isLoading}>

@@ -267,6 +267,24 @@
   color: #e2e8f0;
 }
 
+.login-remember-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.login-remember-row input[type="checkbox"] {
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+.login-remember-row label {
+  cursor: pointer;
+}
+
 .login-button {
   width: 100%;
   margin-top: 12px;
