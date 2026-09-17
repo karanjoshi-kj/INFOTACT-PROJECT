@@ -76,7 +76,7 @@ function SignupPage() {
       <div className="signup-card-wrapper">
         <div className="signup-corner-tab"></div>
         <form className="signup-card" onSubmit={handleSubmit} noValidate>
-          <div className="signup-header-icon">SD</div>
+          <div className="signup-brand">SyncDoc</div>
           <h1 className="signup-title">Create Account</h1>
           <p className="signup-subtitle">Join SyncDoc and start collaborating</p>
 

@@ -61,7 +61,7 @@ function LoginPage() {
       <div className="login-card-wrapper">
         <div className="login-corner-tab"></div>
         <form className="login-card" onSubmit={handleSubmit} noValidate>
-          <div className="login-header-icon">SD</div>
+          <div className="login-brand">SyncDoc</div>
           <h1 className="login-title">Welcome back</h1>
           <p className="login-subtitle">Log in to SyncDoc to continue</p>
 

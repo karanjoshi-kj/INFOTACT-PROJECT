@@ -138,20 +138,15 @@
   color: #ffffff;
 }
 
-.login-header-icon {
-  width: 64px;
-  height: 64px;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 60%, #3b82f6 100%);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  color: #ffffff;
+.login-brand {
   font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #a5b4fc 0%, #ffffff 60%, #93c5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   margin-bottom: 28px;
-  box-shadow: 0 12px 24px -6px rgba(99, 102, 241, 0.55);
 }
 
 .login-title {
