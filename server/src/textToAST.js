@@ -8,10 +8,12 @@ function textToAST(typedText) {
 
   paragraphs.forEach((paragraphText, index) => {
     const paragraphNode = {
-      id: `p${index + 1}`,
-      type: "paragraph",
-      children: []
-    };
+    id: `p${index + 1}`,
+    type: "paragraph",
+    parentId: null,
+    position: index,
+    children: []
+  };
 
     const textPattern = /(\*\*.*?\*\*|\*.*?\*|__.*?__|[^*_]+)/g;
     const textParts = paragraphText.match(textPattern) || [];

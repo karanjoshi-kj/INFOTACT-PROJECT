@@ -24,6 +24,15 @@ const blockSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    parentId: {
+      type: String,
+      default: null,
+    },
+    position: {
+      type: Number,
+     required: true,
+     min: 0,
+    },
     type: {
       type: String,
       required: true,
@@ -52,19 +61,49 @@ const documentSchema = new mongoose.Schema(
   }
 );
 
-const Document = mongoose.model("Document", documentSchema);
+function validateBlocks(blocks, parentId = null) {
+  const ids = new Set();
 
-module.exports = Document;
-documentSchema.pre("save", function (next) {
-  this.children.forEach((block, index) => {
+  blocks.forEach((block, index) => {
+    // Check if the block has an ID
     if (!block.id) {
       throw new Error(`Block at position ${index} must have an id`);
     }
 
-    if (block.id !== `p${index + 1}`) {
-      throw new Error(`Invalid block id at position ${index}`);
+    // Check for duplicate block IDs
+    if (ids.has(block.id)) {
+      throw new Error(`Duplicate block id: ${block.id}`);
+    }
+
+    ids.add(block.id);
+
+    // Check if the position is correct
+    if (block.position !== undefined && block.position !== index) {
+      throw new Error(`Invalid position for block: ${block.id}`);
+    }
+    // Check if the parent ID is correct
+    if (block.parentId !== parentId) {
+      throw new Error(`Invalid parent ID for block: ${block.id}`);
+    }
+
+    // Recursively validate nested blocks
+    if (block.children && block.children.length > 0) {
+      const nestedBlocks = block.children.filter(
+        (child) => child.id && child.type !== "text"
+      );
+
+      if (nestedBlocks.length > 0) {
+        validateBlocks(nestedBlocks, block.id);
+      }
     }
   });
+}
 
+documentSchema.pre("save", function (next) {
+  validateBlocks(this.children);
   next();
 });
+
+const Document = mongoose.model("Document", documentSchema);
+
+module.exports = Document;
