@@ -39,3 +39,29 @@
   border: 1px solid var(--color-primary);
   border-radius: 4px;
 }
+
+.title-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.title-bar-user {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.title-bar-logout {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.title-bar-logout:hover {
+  background: var(--color-bg);
+}

@@ -1,16 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import './TitleBar.css'
 
-function TitleBar({ title, onTitleChange }) {
+function TitleBar({ title, onTitleChange, user, onLogout }) {
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
-
-  // Keep the local input in sync if the title changes from outside while not editing
-  useEffect(() => {
-    if (!editing) {
-      setLocalTitle(title)
-    }
-  }, [title, editing])
 
   const startEditing = () => {
     setLocalTitle(title)
@@ -65,6 +58,15 @@ function TitleBar({ title, onTitleChange }) {
           </h1>
         )}
       </div>
+
+      {onLogout && (
+        <div className="title-bar-right">
+          {user?.name && <span className="title-bar-user">{user.name}</span>}
+          <button type="button" className="title-bar-logout" onClick={onLogout}>
+            Log out
+          </button>
+        </div>
+      )}
     </header>
   )
 }

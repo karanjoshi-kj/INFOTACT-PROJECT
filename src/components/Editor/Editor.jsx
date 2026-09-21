@@ -2,18 +2,24 @@ import { useRef, useEffect } from 'react'
 import Toolbar from './Toolbar.jsx'
 import './Editor.css'
 
-// NOTE: document.execCommand is a quick Week-1 stand-in.
-// It'll be replaced once the AST-based block editor architecture
-// (per the CRDT/Yjs sync plan) is wired up in later weeks.
-function Editor({ value, onChange }) {
+// NOTE: document.execCommand is deprecated but still works in all browsers.
+// It is a Week-1 stand-in and will be replaced when the AST-based block
+// editor (Yjs / CRDT sync plan) is wired up in later weeks.
+//
+// Props:
+//   initialHtml - optional HTML to load once when the editor first appears
+//   onChange    - called on every edit with { html, text }
+//                 html -> keeps formatting, this is what the backend
+//                         text-to-tree function will receive
+//                 text -> plain text, used for word/character counts
+function Editor({ initialHtml = '', onChange }) {
   const editorRef = useRef(null)
 
-  // Set initial content once on mount only — we deliberately don't
-  // re-sync on every `value` change, since overwriting innerText on
-  // every keystroke would reset the cursor position mid-typing.
+  // Load the initial content ONCE on mount. We never re-sync afterwards,
+  // because overwriting the content on every keystroke would reset the cursor.
   useEffect(() => {
-    if (editorRef.current && value && editorRef.current.innerText === '') {
-      editorRef.current.innerText = value
+    if (editorRef.current && initialHtml && editorRef.current.innerHTML === '') {
+      editorRef.current.innerHTML = initialHtml
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -21,10 +27,30 @@ function Editor({ value, onChange }) {
   const handleFormat = (command, arg = null) => {
     document.execCommand(command, false, arg)
     editorRef.current.focus()
+    // execCommand fires an "input" event by itself, so handleInput runs next.
   }
 
-  const handleInput = (e) => {
-    onChange(e.currentTarget.innerText)
+  const handleInput = () => {
+    const el = editorRef.current
+    if (!el) return
+
+    // After deleting everything, browsers leave a stray <br>, which hides
+    // the placeholder. Clearing it brings the placeholder back.
+    if (el.innerHTML === '<br>') {
+      el.innerHTML = ''
+    }
+
+    if (onChange) {
+      onChange({ html: el.innerHTML, text: el.innerText })
+    }
+  }
+
+  // Always paste as plain text so text copied from websites/Word
+  // doesn't bring in messy styles and break the document structure.
+  const handlePaste = (e) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    document.execCommand('insertText', false, text)
   }
 
   const handleKeyDown = (e) => {
@@ -79,6 +105,7 @@ function Editor({ value, onChange }) {
         data-placeholder="Start typing your document..."
         onInput={handleInput}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
       />
     </div>
   )

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { signupUser, loginUser } from '../../services/api.js'
+import { saveSession } from '../../utils/auth.js'
 import './Signup.css'
 
 const EyeIcon = () => (
@@ -30,18 +32,19 @@ function SignupPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const navigate = useNavigate()
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    if (isLoading) return
 
     const trimmedName = name.trim()
-    const trimmedEmail = email.trim()
+    const normalizedEmail = email.trim().toLowerCase()
 
-    if (!trimmedName || !trimmedEmail || !password || !confirmPassword) {
+    if (!trimmedName || !normalizedEmail || !password || !confirmPassword) {
       setError('Please fill in all fields.')
       return
     }
 
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
       setError('Please enter a valid email address.')
       return
     }
@@ -59,13 +62,26 @@ function SignupPage() {
     setError('')
     setIsLoading(true)
 
-    // TODO: swap this for a real call once backend auth endpoint is ready
-    // fetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name: trimmedName, email: trimmedEmail, password }) })
-    setTimeout(() => {
+    // Step 1: create the account
+    try {
+      await signupUser({ name: trimmedName, email: normalizedEmail, password })
+    } catch (err) {
+      setError(err.message)
       setIsLoading(false)
-      console.log('Signup attempt:', { name: trimmedName, email: trimmedEmail })
-      navigate('/editor')
-    }, 800)
+      return
+    }
+
+    // Step 2: log in automatically (signup does not return a token)
+    try {
+      const data = await loginUser({ email: normalizedEmail, password })
+      if (!data?.token) throw new Error('No token returned.')
+
+      saveSession({ token: data.token, user: data.user }, false)
+      navigate('/editor', { replace: true })
+    } catch {
+      // Account exists, only the auto-login failed
+      navigate('/login', { replace: true })
+    }
   }
 
   return (
@@ -81,7 +97,7 @@ function SignupPage() {
           <p className="signup-subtitle">Join SyncDoc and start collaborating</p>
 
           {error && (
-            <div className="signup-error" role="alert" aria-live="polite">
+            <div className="signup-error" id="signup-error-msg" role="alert" aria-live="polite">
               {error}
             </div>
           )}
@@ -101,6 +117,7 @@ function SignupPage() {
                 autoFocus
                 required
                 aria-invalid={!!error}
+                aria-describedby={error ? 'signup-error-msg' : undefined}
               />
             </div>
           </div>
@@ -119,6 +136,7 @@ function SignupPage() {
                 autoComplete="email"
                 required
                 aria-invalid={!!error}
+                aria-describedby={error ? 'signup-error-msg' : undefined}
               />
             </div>
           </div>

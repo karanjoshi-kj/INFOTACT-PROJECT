@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import TitleBar from '../components/Layout/TitleBar.jsx'
 import Editor from '../components/Editor/Editor.jsx'
+import { getUser, clearSession } from '../utils/auth.js'
 import './EditorPage.css'
 
 const SunIcon = () => (
@@ -24,25 +26,38 @@ const MoonIcon = () => (
 )
 
 const getInitialTheme = () => {
-  const stored = localStorage.getItem('syncdoc-theme')
-  return stored === 'dark' ? 'dark' : 'light'
+  try {
+    const stored = localStorage.getItem('syncdoc-theme')
+    return stored === 'dark' ? 'dark' : 'light'
+  } catch {
+    return 'light'
+  }
 }
 
 function EditorPage() {
   const [title, setTitle] = useState('Untitled Document')
-  const [content, setContent] = useState('')
   const [saveStatus, setSaveStatus] = useState('All changes saved')
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
   const [theme, setTheme] = useState(getInitialTheme)
+  const navigate = useNavigate()
+  const user = getUser()
 
+  // Always holds the newest { html, text } from the editor.
+  // In Week 2 this is what gets sent to the backend, where the
+  // text-to-tree function turns the html into Document -> Paragraph -> Text.
+  const latestContentRef = useRef({ html: '', text: '' })
   const debounceTimerRef = useRef(null)
   const savingTimerRef = useRef(null)
 
   // Apply theme to the whole document and remember the choice
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('syncdoc-theme', theme)
+    try {
+      localStorage.setItem('syncdoc-theme', theme)
+    } catch {
+      // ignore storage errors
+    }
   }, [theme])
 
   // Clear any pending auto-save timers if the page unmounts mid-sequence
@@ -57,17 +72,23 @@ function EditorPage() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
   }
 
-  // Handle typing and auto-save simulation
-  const handleContentChange = (newContent) => {
-    setContent(newContent)
+  const handleLogout = () => {
+    clearSession()
+    navigate('/login', { replace: true })
+  }
+
+  // Runs on every edit. `html` keeps the formatting, `text` is used for counts.
+  const handleContentChange = ({ html, text }) => {
+    latestContentRef.current = { html, text }
     setSaveStatus('Unsaved changes...')
 
-    // Calculate words and characters
-    const words = newContent.trim() ? newContent.trim().split(/\s+/).length : 0
-    setWordCount(words)
-    setCharCount(newContent.length)
+    const trimmed = text.trim()
+    setWordCount(trimmed ? trimmed.split(/\s+/).length : 0)
+    setCharCount(text.length)
 
-    // Simulate auto-save after 1 second of inactivity
+    // Auto-save is still simulated until the backend has a save route.
+    // Later, replace the inner timeout with a real API call that sends
+    // latestContentRef.current.html.
     clearTimeout(debounceTimerRef.current)
     clearTimeout(savingTimerRef.current)
 
@@ -84,12 +105,13 @@ function EditorPage() {
       <TitleBar
         title={title}
         onTitleChange={setTitle}
+        user={user}
+        onLogout={handleLogout}
       />
 
       <main className="editor-page-main">
         <div className="editor-container">
-          {/* Passing content and the change handler down to the Editor component */}
-          <Editor value={content} onChange={handleContentChange} />
+          <Editor onChange={handleContentChange} />
         </div>
       </main>
 
