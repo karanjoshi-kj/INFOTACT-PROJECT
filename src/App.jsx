@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import WelcomePage from './pages/WelcomePage.jsx'
 import LoginPage from './components/Auth/LoginPage.jsx'
 import SignupPage from './components/Auth/SignupPage.jsx'
 import ForgotPasswordPage from './components/Auth/ForgotPasswordPage.jsx'
@@ -10,7 +11,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/editor" replace />} />
+        <Route path="/" element={<WelcomePage />} />
 
         <Route
           path="/login"

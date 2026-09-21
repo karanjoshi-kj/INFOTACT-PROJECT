@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+.welcome-page {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0d1224;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+  font-family: 'Inter', sans-serif;
+}
+
+.welcome-fade-in {
+  animation: welcomeFadeIn 0.7s ease forwards;
+}
+
+.welcome-fade-out {
+  animation: welcomeFadeOut 0.5s ease forwards;
+}
+
+@keyframes welcomeFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes welcomeFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-60px);
+  }
+}
+
+.welcome-glow-1 {
+  position: absolute;
+  top: -120px;
+  left: -120px;
+  width: 480px;
+  height: 480px;
+  background: rgba(99, 102, 241, 0.2);
+  filter: blur(120px);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.welcome-glow-2 {
+  position: absolute;
+  bottom: -100px;
+  right: -120px;
+  width: 480px;
+  height: 480px;
+  background: rgba(59, 130, 246, 0.2);
+  filter: blur(120px);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.welcome-content {
+  position: relative;
+  z-index: 10;
+  text-align: center;
+  max-width: 720px;
+}
+
+.welcome-eyebrow {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.35em;
+  color: #94a3b8;
+  margin: 0 0 18px;
+  text-transform: uppercase;
+}
+
+.welcome-title {
+  font-size: clamp(56px, 11vw, 128px);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin: 0 0 20px;
+  background: linear-gradient(135deg, #a5b4fc 0%, #ffffff 55%, #93c5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.welcome-subtitle {
+  font-size: 17px;
+  color: #94a3b8;
+  margin: 0 0 44px;
+  font-weight: 500;
+}
+
+.welcome-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 38px;
+  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.2px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -6px rgba(79, 70, 229, 0.45);
+  transition: all 0.2s ease;
+}
+
+.welcome-button:hover {
+  background: linear-gradient(135deg, #4338ca 0%, #1d4ed8 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -6px rgba(79, 70, 229, 0.55);
+}
+
+.welcome-button:active {
+  transform: translateY(0);
+}
+
+.welcome-mountains {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 42vh;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.welcome-mountain-layer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.welcome-mountain-back polygon {
+  fill: rgba(99, 102, 241, 0.12);
+}
+
+.welcome-mountain-mid polygon {
+  fill: rgba(99, 102, 241, 0.2);
+}
+
+.welcome-mountain-front polygon {
+  fill: rgba(13, 18, 36, 0.9);
+}
+
+@media (max-width: 520px) {
+  .welcome-subtitle {
+    font-size: 15px;
+    padding: 0 8px;
+  }
+  .welcome-button {
+    padding: 16px 30px;
+    font-size: 15px;
+  }
+}
