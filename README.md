@@ -1,16 +1,44 @@
-# React + Vite
+# SyncDoc - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Real-time collaborative document editor (React + Vite).
 
-Currently, two official plugins are available:
+## Run the project
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Start the backend first (in a separate terminal):
 
-## React Compiler
+       cd server
+       npm install
+       npm run dev
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+   The server needs a `server/.env` file with `MONGO_URI` and `JWT_SECRET`.
 
-## Expanding the ESLint configuration
+2. Start the frontend (from the project root):
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+       npm install
+       npm run dev
+
+   The app runs on http://localhost:5173. Requests to `/api` are proxied to
+   the backend on http://localhost:5000 (see `vite.config.js`).
+
+## Folder structure
+
+    src/
+      components/
+        Auth/      Login, Signup, Forgot Password, route guards
+        Editor/    Editor + Toolbar
+        Layout/    Title bar
+      pages/       EditorPage
+      services/    api.js  (all backend calls)
+      utils/       auth.js (JWT session storage)
+
+## How the editor sends data
+
+The editor reports `{ html, text }` on every change. The backend
+text-to-tree function converts `html` into the document tree:
+Document -> Paragraph -> Text (with bold/italic/underline marks).
+
+## Auth flow
+
+- Login/Signup call `/api/auth/login` and `/api/auth/signup`.
+- The JWT is stored in localStorage ("Remember me") or sessionStorage.
+- `/editor` is protected; logged-out users are redirected to `/login`.
