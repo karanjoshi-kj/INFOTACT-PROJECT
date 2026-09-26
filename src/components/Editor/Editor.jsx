@@ -1,28 +1,69 @@
 import { useRef, useEffect } from 'react'
+import * as Y from 'yjs'
+import { WebsocketProvider } from 'y-websocket'
 import Toolbar from './Toolbar.jsx'
 import './Editor.css'
 
-// NOTE: document.execCommand is deprecated but still works in all browsers.
-// It is a Week-1 stand-in and will be replaced when the AST-based block
-// editor (Yjs / CRDT sync plan) is wired up in later weeks.
-//
-// Props:
-//   initialHtml - optional HTML to load once when the editor first appears
-//   onChange    - called on every edit with { html, text }
-//                 html -> keeps formatting, this is what the backend
-//                         text-to-tree function will receive
-//                 text -> plain text, used for word/character counts
-function Editor({ initialHtml = '', onChange }) {
+// documentId decides which "room" this editor syncs to - all users editing
+// the same document must use the same documentId.
+function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
   const editorRef = useRef(null)
+  const ydocRef = useRef(null)
+  const ytextRef = useRef(null)
+  const providerRef = useRef(null)
+  const isLocalUpdate = useRef(false) // guards against feedback loops
 
-  // Load the initial content ONCE on mount. We never re-sync afterwards,
-  // because overwriting the content on every keystroke would reset the cursor.
+  // Set up the shared Yjs document + WebSocket connection once on mount
   useEffect(() => {
-    if (editorRef.current && initialHtml && editorRef.current.innerHTML === '') {
-      editorRef.current.innerHTML = initialHtml
+    const ydoc = new Y.Doc()
+    const provider = new WebsocketProvider('ws://localhost:1234', documentId, ydoc)
+    const ytext = ydoc.getText('content')
+
+    ydocRef.current = ydoc
+    ytextRef.current = ytext
+    providerRef.current = provider
+
+    // Whenever the shared text changes (from ANY user, including this one),
+    // reflect it in the DOM - but skip re-rendering if this change came
+    // from our own typing (we already updated the DOM directly).
+    const updateDOM = () => {
+      if (isLocalUpdate.current) {
+        isLocalUpdate.current = false
+        return
+      }
+      const el = editorRef.current
+      if (el) {
+        const newHtml = ytext.toString()
+        if (el.innerHTML !== newHtml) {
+          el.innerHTML = newHtml
+        }
+      }
+    }
+
+    ytext.observe(updateDOM)
+
+    // Once connected, if the shared doc already has content, load it.
+    // If it's empty and we have initialHtml, seed it.
+    provider.on('sync', (isSynced) => {
+      if (isSynced) {
+        const el = editorRef.current
+        if (ytext.length > 0) {
+          if (el) el.innerHTML = ytext.toString()
+        } else if (initialHtml) {
+          ydoc.transact(() => {
+            ytext.insert(0, initialHtml)
+          })
+        }
+      }
+    })
+
+    return () => {
+      ytext.unobserve(updateDOM)
+      provider.destroy()
+      ydoc.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [documentId])
 
   const handleFormat = (command, arg = null) => {
     document.execCommand(command, false, arg)
@@ -38,6 +79,18 @@ function Editor({ initialHtml = '', onChange }) {
     // the placeholder. Clearing it brings the placeholder back.
     if (el.innerHTML === '<br>') {
       el.innerHTML = ''
+    }
+
+    // Push this local change into the shared Yjs document so it syncs
+    // to every other connected user.
+    const ytext = ytextRef.current
+    const ydoc = ydocRef.current
+    if (ytext && ydoc) {
+      isLocalUpdate.current = true
+      ydoc.transact(() => {
+        ytext.delete(0, ytext.length)
+        ytext.insert(0, el.innerHTML)
+      })
     }
 
     if (onChange) {
