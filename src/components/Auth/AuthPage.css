@@ -1,0 +1,706 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  /* ===== ROYAL palette =====
+     Sampled from a deep royal-blue halftone reference: a near-black
+     navy void, a solid royal-blue base, a mid and bright royal-blue for
+     gradients/accents, and a pale periwinkle for text/highlights.
+     #E7ECFB pale periwinkle / #93A8E8 soft accent / #4763C9 bright royal /
+     #203AA0 mid royal / #142979 deep royal / #0A1650 royal base /
+     #050B26 near-black navy void */
+  --royal-100: #E7ECFB;
+  --royal-300: #93A8E8;
+  --royal-500: #4763C9;
+  --royal-700: #203AA0;
+  --royal-800: #142979;
+  --royal-900: #0A1650;
+  --royal-950: #050B26;
+
+  --auth-bg: var(--royal-950);
+  --auth-surface: rgba(10, 22, 80, 0.82);
+  --auth-border: rgba(71, 99, 201, 0.2);
+  --auth-border-strong: rgba(147, 168, 232, 0.3);
+  --auth-text-primary: var(--royal-100);
+  --auth-text-secondary: #a3b3e4;
+  --auth-text-muted: #5b6da3;
+  --auth-input-bg: rgba(5, 11, 38, 0.78);
+  --auth-input-border: rgba(71, 99, 201, 0.35);
+  --auth-accent-1: var(--royal-700);
+  --auth-accent-2: var(--royal-500);
+  --auth-accent-3: var(--royal-500);
+  --auth-accent-soft: var(--royal-300);
+  --auth-danger: #f87171;
+  --auth-radius-md: 16px;
+  --auth-radius-sm: 16px;
+  --auth-cut: 28px; /* size of the cut/chamfered corners on the outer frame */
+
+  /* ===== Claymorphism shadow tokens (dialed down) =====
+     Softer, smaller-spread dual shadow than before — still gives a
+     puffy molded-clay look, but noticeably lighter/subtler. */
+  --clay-radius: 34px;
+  --clay-shadow-dark: rgba(2, 6, 26, 0.4);
+  --clay-shadow-darker: rgba(2, 6, 26, 0.3);
+  --clay-shadow-light: rgba(147, 168, 232, 0.05);
+  --clay-highlight: rgba(255, 255, 255, 0.04);
+  --clay-raised:
+    5px 5px 10px var(--clay-shadow-dark),
+    -4px -4px 9px var(--clay-shadow-light),
+    inset 0 1px 0 var(--clay-highlight);
+  --clay-raised-sm:
+    3px 3px 6px var(--clay-shadow-darker),
+    -3px -3px 6px var(--clay-shadow-light),
+    inset 0 1px 0 var(--clay-highlight);
+  --clay-pressed:
+    inset 2px 2px 5px rgba(2, 6, 26, 0.35),
+    inset -2px -2px 4px rgba(147, 168, 232, 0.04);
+}
+
+.auth-page {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--auth-bg);
+  background-image:
+    linear-gradient(rgba(147, 168, 232, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(147, 168, 232, 0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  position: relative;
+  overflow: hidden;
+  padding: 32px 20px;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Halftone-dot texture: a fine dot grid, concentrated into a soft
+   diagonal band and faded elsewhere via a mask — this is what gives the
+   reference image its "scanned blueprint" depth instead of a flat fill. */
+.auth-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(var(--royal-300) 1px, transparent 1.4px);
+  background-size: 7px 7px;
+  opacity: 0.4;
+  -webkit-mask-image: linear-gradient(
+    118deg,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.9) 18%,
+    transparent 48%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+  mask-image: linear-gradient(
+    118deg,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.9) 18%,
+    transparent 48%,
+    transparent 70%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+}
+
+.auth-glow-1 {
+  position: absolute;
+  top: -140px;
+  left: -140px;
+  width: 520px;
+  height: 520px;
+  background: rgba(32, 58, 160, 0.28);
+  filter: blur(130px);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.auth-glow-2 {
+  position: absolute;
+  bottom: -140px;
+  right: -140px;
+  width: 520px;
+  height: 520px;
+  background: rgba(71, 99, 201, 0.2);
+  filter: blur(130px);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== Outer frame ===== */
+.auth-frame {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 780px;
+  min-height: 520px;
+  /* Shadow effect reduced: smaller blur/offset, lower opacity */
+  filter: drop-shadow(0 14px 26px rgba(5, 11, 38, 0.35));
+}
+
+/* ===== The card itself =====
+   Claymorphism panel: soft (now lighter) dual shadow, chamfered/cut
+   corners on three sides while the top-right corner is a plain,
+   smoothly curved edge — no cut, no stripes. */
+.auth-container {
+  position: absolute;
+  inset: 0;
+  background: var(--auth-surface);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 2.6px solid rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  border-radius: 0 var(--clay-radius) 0 0;
+  box-shadow:
+    var(--clay-raised),
+    0 16px 32px -18px rgba(5, 11, 38, 0.45);
+  /* 7-point polygon: chamfers TL / BR / BL, leaves TR corner alone so the
+     border-radius above shows through as a smooth curve there. */
+  clip-path: polygon(
+    var(--auth-cut) 0,
+    100% 0,
+    100% calc(100% - var(--auth-cut)),
+    calc(100% - var(--auth-cut)) 100%,
+    var(--auth-cut) 100%,
+    0 calc(100% - var(--auth-cut)),
+    0 var(--auth-cut)
+  );
+}
+
+/* ===== Decorative corner accents ===== */
+.auth-corner {
+  position: absolute;
+  width: calc(var(--auth-cut) + 6px);
+  height: calc(var(--auth-cut) + 6px);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.auth-corner-tl {
+  top: -3.5px;
+  left: -3.5px;
+  border-top: 4px solid var(--auth-accent-soft);
+  border-left: 4px solid var(--auth-accent-soft);
+}
+
+.auth-corner-br {
+  bottom: -3.5px;
+  right: -3.5px;
+  border-bottom: 4px solid var(--auth-accent-soft);
+  border-right: 4px solid var(--auth-accent-soft);
+}
+
+/* Top-right: no stripes */
+.auth-corner-tr {
+  top: -2.5px;
+  right: -2.5px;
+  width: 70.8px;
+  height: 70.8px;
+  border-top: 7.8px solid  var(--auth-accent-soft);
+  border-right: 7.8px solid var(--auth-accent-soft);
+  border-top-right-radius: var(--clay-radius);
+  opacity: 1;
+}
+
+/* ===== Individual form panels =====
+   True sliding: the inactive panel is parked fully off-canvas
+   (translateX(200%)) instead of sitting in the same spot with opacity
+   animated, so sign-in/sign-up travel independent paths — a real
+   slide, not a fade/flip. */
+.form-container {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 50%;
+  overflow-y: auto;
+  transition:
+    transform 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0s;
+}
+
+.sign-in-container {
+  left: 0;
+  z-index: 2;
+  transform: translateX(0%);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.sign-up-container {
+  left: 0;
+  z-index: 1;
+  transform: translateX(200%);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.7s;
+}
+
+.auth-container.right-panel-active .sign-in-container {
+  transform: translateX(200%);
+  z-index: 1;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.7s;
+}
+
+.auth-container.right-panel-active .sign-up-container {
+  transform: translateX(100%);
+  z-index: 5;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0s;
+}
+
+.auth-form {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 50px 46px;
+  color: var(--auth-text-primary);
+}
+
+.auth-brand {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, var(--royal-100) 0%, var(--royal-300) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 20px;
+}
+
+.auth-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--auth-text-primary);
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+
+.auth-subtitle {
+  font-size: 13.5px;
+  color: var(--auth-text-secondary);
+  margin-top: 6px;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+
+.auth-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  color: var(--auth-danger);
+  padding: 11px 15px;
+  border-radius: var(--auth-radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.auth-input-group {
+  margin-bottom: 12px;
+}
+
+.auth-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Claymorphism inputs: soft (lighter) inset groove */
+.auth-input {
+  width: 100%;
+  padding: 12px 15px;
+  background: var(--auth-input-bg);
+  border: 1px solid var(--auth-input-border);
+  border-radius: var(--auth-radius-sm);
+  color: var(--auth-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  font-family: inherit;
+  box-shadow: var(--clay-pressed);
+}
+
+.auth-input.has-toggle {
+  padding-right: 44px;
+}
+
+.auth-input::placeholder {
+  color: var(--auth-text-muted);
+  font-weight: 400;
+}
+
+.auth-input:hover:not(:focus):not(:disabled) {
+  border-color: rgba(147, 168, 232, 0.4);
+}
+
+.auth-input:focus {
+  border-color: var(--auth-accent-3);
+  box-shadow:
+    var(--clay-pressed),
+    0 0 0 3px rgba(71, 99, 201, 0.2);
+  background: rgba(5, 11, 38, 0.92);
+}
+
+.auth-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth-eye-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--auth-text-secondary);
+  cursor: pointer;
+  display: flex;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.2s;
+}
+
+.auth-eye-btn:hover {
+  color: var(--auth-text-primary);
+}
+
+.auth-row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 0 16px;
+  font-size: 12.5px;
+  gap: 12px;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--auth-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.auth-remember input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--auth-accent-2);
+  cursor: pointer;
+}
+
+.auth-forgot-link {
+  color: var(--auth-accent-soft);
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.auth-forgot-link:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* Claymorphism primary button: puffy (now subtler) clay pill that
+   visibly "presses in" on click. */
+.auth-button {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--auth-accent-1) 0%, var(--auth-accent-2) 100%);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: 0.1px;
+  border: none;
+  border-radius: var(--auth-radius-sm);
+  cursor: pointer;
+  box-shadow:
+    var(--clay-raised-sm),
+    0 8px 18px -10px rgba(32, 58, 160, 0.5);
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 47px;
+  margin-top: 6px;
+}
+
+.auth-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--royal-800) 0%, var(--royal-700) 100%);
+  transform: translateY(-1px);
+  box-shadow:
+    var(--clay-raised-sm),
+    0 10px 20px -10px rgba(32, 58, 160, 0.6);
+}
+
+.auth-button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    var(--clay-pressed),
+    0 5px 12px -10px rgba(32, 58, 160, 0.5);
+}
+
+.auth-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #ffffff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.auth-mobile-switch {
+  display: none;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--auth-text-secondary);
+  margin-top: 18px;
+}
+
+.auth-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--auth-accent-soft);
+  font-weight: 700;
+  font-size: 13.5px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.2s;
+}
+
+.auth-link-btn:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* ===== Sliding overlay =====
+   The panel's inner edge (the one facing the form side) is rounded into
+   a big single curve via border-radius rather than clip-path, so it can
+   transition smoothly alongside the translateX slide without any
+   flip/fold artifact. The border-radius is mirrored (left edge <-> right
+   edge) in the ".right-panel-active" state below so the curve always
+   faces the form it's sliding next to. */
+.overlay-container {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+  /* Curved "lens" edge facing the form side, like the reference mock. */
+  border-radius: 52% 0 0 52% / 50% 0 0 50%;
+  border: 2.4px solid rgba(255, 255, 255, 0.9);
+  transition:
+    transform 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    border-radius 0.7s cubic-bezier(0.65, 0, 0.35, 1);
+  z-index: 100;
+  box-shadow:
+    4px 4px 10px rgba(5, 11, 38, 0.28),
+    -3px -3px 8px rgba(147, 168, 232, 0.04);
+}
+
+.auth-container.right-panel-active .overlay-container {
+  transform: translateX(-100%);
+  /* Mirror the curve onto the opposite edge once the panel slides left. */
+  border-radius: 0 52% 52% 0 / 0 50% 50% 0;
+}
+
+.overlay {
+  background:
+    radial-gradient(circle at 25% 15%, rgba(147, 168, 232, 0.12) 0%, transparent 45%),
+    radial-gradient(circle at 80% 85%, rgba(255, 255, 255, 0.05) 0%, transparent 50%),
+    linear-gradient(150deg, var(--royal-900) 0%, var(--royal-700) 45%, var(--royal-500) 100%);
+  position: relative;
+  left: -100%;
+  height: 100%;
+  width: 200%;
+  transform: translateX(0);
+  transition: transform 0.7s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.auth-container.right-panel-active .overlay {
+  transform: translateX(50%);
+}
+
+.overlay-panel {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 46px;
+  text-align: center;
+  color: #ffffff;
+  transition: transform 0.7s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.overlay-left {
+  left: 0;
+  transform: translateX(-18%);
+}
+
+.auth-container.right-panel-active .overlay-left {
+  transform: translateX(0);
+}
+
+.overlay-right {
+  right: 0;
+  transform: translateX(0);
+}
+
+.auth-container.right-panel-active .overlay-right {
+  transform: translateX(18%);
+}
+
+.overlay-panel h2 {
+  font-size: 25px;
+  font-weight: 800;
+  margin-bottom: 13px;
+  letter-spacing: -0.3px;
+}
+
+.overlay-panel p {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 28px;
+  max-width: 260px;
+}
+
+/* Claymorphism ghost button on the overlay (shadow reduced) */
+.ghost-button {
+  padding: 12px 36px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  box-shadow:
+    2px 2px 6px rgba(0, 0, 0, 0.18),
+    -2px -2px 5px rgba(255, 255, 255, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.ghost-button:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.85);
+  transform: translateY(-1px);
+}
+
+.ghost-button:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 2px 2px 6px rgba(0, 0, 0, 0.22),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.05);
+}
+
+/* ===== Desktop: nudge the whole card toward the right half of the page ===== */
+@media (min-width: 901px) {
+  .auth-page {
+    justify-content: flex-end;
+    padding-right: clamp(24px, 7vw, 120px);
+  }
+}
+
+/* ===== Tablet ===== */
+@media (max-width: 900px) {
+  .auth-frame {
+    max-width: 600px;
+  }
+  .auth-form {
+    padding: 44px 34px;
+  }
+  .overlay-panel {
+    padding: 0 30px;
+  }
+}
+
+/* ===== Mobile: single stacked card, no split/overlay ===== */
+@media (max-width: 760px) {
+  .auth-frame {
+    max-width: 420px;
+    min-height: 0;
+    --auth-cut: 18px;
+  }
+
+  .auth-container {
+    position: relative;
+    inset: auto;
+    border-radius: 0 22px 0 0;
+  }
+
+  .overlay-container {
+    display: none;
+  }
+
+  .form-container {
+    position: relative;
+    width: 100%;
+    left: 0 !important;
+    transform: none !important;
+    opacity: 1 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    z-index: 1 !important;
+    display: none;
+  }
+
+  .sign-in-container.active-mobile,
+  .sign-up-container.active-mobile {
+    display: block;
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
+  .auth-form {
+    padding: 40px 28px;
+  }
+
+  .auth-mobile-switch {
+    display: block;
+  }
+}
+
+@media (max-width: 420px) {
+  .auth-form {
+    padding: 34px 22px;
+  }
+  .auth-title {
+    font-size: 23px;
+  }
+}

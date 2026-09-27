@@ -7,14 +7,14 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #0d1224;
+  background: #011c40;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(rgba(167, 235, 242, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 235, 242, 0.025) 1px, transparent 1px);
   background-size: 48px 48px;
   position: relative;
   overflow: hidden;
-  padding: 24px;
+  padding: 32px 24px;
   font-family: 'Inter', sans-serif;
 }
 
@@ -48,7 +48,7 @@
   left: -120px;
   width: 480px;
   height: 480px;
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(38, 101, 140, 0.24);
   filter: blur(120px);
   border-radius: 50%;
   pointer-events: none;
@@ -61,7 +61,7 @@
   right: -120px;
   width: 480px;
   height: 480px;
-  background: rgba(59, 130, 246, 0.2);
+  background: rgba(84, 172, 191, 0.22);
   filter: blur(120px);
   border-radius: 50%;
   pointer-events: none;
@@ -72,62 +72,85 @@
   position: relative;
   z-index: 10;
   text-align: center;
-  max-width: 720px;
+  max-width: 680px;
+  margin: 0 auto;
 }
 
 .welcome-eyebrow {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.35em;
-  color: #94a3b8;
-  margin: 0 0 18px;
+  letter-spacing: 0.32em;
+  color: #8fb7c9;
+  margin: 0 0 16px;
   text-transform: uppercase;
 }
 
 .welcome-title {
-  font-size: clamp(56px, 11vw, 128px);
+  font-size: clamp(48px, 9vw, 104px);
   font-weight: 900;
   letter-spacing: -0.02em;
-  line-height: 1;
-  margin: 0 0 20px;
-  background: linear-gradient(135deg, #a5b4fc 0%, #ffffff 55%, #93c5fd 100%);
+  line-height: 1.02;
+  margin: 0 0 18px;
+  background: linear-gradient(135deg, #a7ebf2 0%, #ffffff 55%, #54acbf 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
 .welcome-subtitle {
-  font-size: 17px;
-  color: #94a3b8;
-  margin: 0 0 44px;
+  font-size: 16px;
+  color: #8fb7c9;
+  margin: 0 auto 40px;
   font-weight: 500;
+  line-height: 1.5;
+  max-width: 480px;
 }
 
 .welcome-button {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 38px;
-  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
+  padding: 16px 34px;
+  background: linear-gradient(135deg, #26658c 0%, #54acbf 100%);
   color: #ffffff;
   font-weight: 700;
-  font-size: 16px;
+  font-size: 15.5px;
   letter-spacing: 0.2px;
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: 0 10px 24px -6px rgba(79, 70, 229, 0.45);
-  transition: all 0.2s ease;
+  /* Claymorphism, shadow effect reduced from earlier version */
+  box-shadow:
+    5px 5px 10px rgba(1, 28, 64, 0.32),
+    -4px -4px 9px rgba(167, 235, 242, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 18px -8px rgba(38, 101, 140, 0.4);
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 }
 
 .welcome-button:hover {
-  background: linear-gradient(135deg, #4338ca 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, #023859 0%, #26658c 100%);
   transform: translateY(-2px);
-  box-shadow: 0 14px 30px -6px rgba(79, 70, 229, 0.55);
+  box-shadow:
+    6px 6px 12px rgba(1, 28, 64, 0.36),
+    -5px -5px 10px rgba(167, 235, 242, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 10px 22px -8px rgba(38, 101, 140, 0.5);
 }
 
 .welcome-button:active {
-  transform: translateY(0);
+  transform: translateY(1px);
+  box-shadow:
+    inset 2px 2px 5px rgba(1, 28, 64, 0.3),
+    inset -2px -2px 4px rgba(167, 235, 242, 0.04);
+}
+
+.welcome-button svg {
+  transition: transform 0.2s ease;
+}
+
+.welcome-button:hover svg {
+  transform: translateX(3px);
 }
 
 .welcome-mountains {
@@ -135,7 +158,7 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  height: 42vh;
+  height: 40vh;
   z-index: 1;
   pointer-events: none;
 }
@@ -149,24 +172,37 @@
 }
 
 .welcome-mountain-back polygon {
-  fill: rgba(99, 102, 241, 0.12);
+  fill: rgba(38, 101, 140, 0.15);
 }
 
 .welcome-mountain-mid polygon {
-  fill: rgba(99, 102, 241, 0.2);
+  fill: rgba(84, 172, 191, 0.22);
 }
 
 .welcome-mountain-front polygon {
-  fill: rgba(13, 18, 36, 0.9);
+  fill: rgba(1, 28, 64, 0.9);
+}
+
+@media (max-width: 768px) {
+  .welcome-title {
+    margin-bottom: 14px;
+  }
+  .welcome-subtitle {
+    margin-bottom: 34px;
+  }
 }
 
 @media (max-width: 520px) {
+  .welcome-eyebrow {
+    letter-spacing: 0.24em;
+    font-size: 12px;
+  }
   .welcome-subtitle {
-    font-size: 15px;
+    font-size: 14.5px;
     padding: 0 8px;
   }
   .welcome-button {
-    padding: 16px 30px;
-    font-size: 15px;
+    padding: 15px 28px;
+    font-size: 14.5px;
   }
 }
