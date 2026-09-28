@@ -33,6 +33,9 @@ const documentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    
+    html: { type: String, default: null },
+
     children: {
       type: [blockSchema],
       default: [{ id: "p1", type: "paragraph", children: [{ type: "text", content: "", marks: [] }] }],
