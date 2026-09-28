@@ -65,3 +65,32 @@
 .title-bar-logout:hover {
   background: var(--color-bg);
 }
+
+/* button that shows / hides the files panel */
+.title-bar-sidebar-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.title-bar-sidebar-btn:hover {
+  background: var(--color-bg);
+  color: var(--color-primary);
+}
+
+.title-bar-sidebar-btn.on {
+  color: var(--color-primary);
+}
+
+.title-bar-sidebar-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}

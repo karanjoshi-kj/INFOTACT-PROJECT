@@ -6,8 +6,10 @@ import './Editor.css'
 
 // documentId decides which "room" this editor syncs to - all users editing
 // the same document must use the same documentId.
-function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
+function Editor({ initialHtml = '', onChange, onRemoteChange, documentId = 'shared-doc' }) {
   const editorRef = useRef(null)
+  const onRemoteChangeRef = useRef(onRemoteChange) // always the newest callback
+  onRemoteChangeRef.current = onRemoteChange
   const ydocRef = useRef(null)
   const ytextRef = useRef(null)
   const providerRef = useRef(null)
@@ -23,6 +25,12 @@ function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
     ytextRef.current = ytext
     providerRef.current = provider
 
+    // Show the content loaded from MongoDB right away, so the document is
+    // visible (and safe) even before / without the live-sync connection.
+    if (editorRef.current && initialHtml) {
+      editorRef.current.innerHTML = initialHtml
+    }
+
     // Whenever the shared text changes (from ANY user, including this one),
     // reflect it in the DOM - but skip re-rendering if this change came
     // from our own typing (we already updated the DOM directly).
@@ -36,6 +44,9 @@ function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
         const newHtml = ytext.toString()
         if (el.innerHTML !== newHtml) {
           el.innerHTML = newHtml
+          if (onRemoteChangeRef.current) {
+            onRemoteChangeRef.current({ html: el.innerHTML, text: el.innerText })
+          }
         }
       }
     }
@@ -50,9 +61,14 @@ function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
         if (ytext.length > 0) {
           if (el) el.innerHTML = ytext.toString()
         } else if (initialHtml) {
-          ydoc.transact(() => {
-            ytext.insert(0, initialHtml)
-          })
+          // Seed the shared doc from MongoDB (e.g. after the backend restarted).
+          // The seed is built with a fixed clientID, so if two users do this at the
+          // same moment, Yjs sees identical edits and merges them into ONE copy.
+          const seed = new Y.Doc()
+          seed.clientID = 0
+          seed.getText('content').insert(0, initialHtml)
+          Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(seed))
+          seed.destroy()
         }
       }
     })
@@ -66,6 +82,8 @@ function Editor({ initialHtml = '', onChange, documentId = 'shared-doc' }) {
   }, [documentId])
 
   const handleFormat = (command, arg = null) => {
+    // formatBlock wants "<h1>" (Firefox rejects a bare "H1")
+    if (command === 'formatBlock' && arg && !arg.startsWith('<')) arg = `<${arg}>`
     document.execCommand(command, false, arg)
     editorRef.current.focus()
     // execCommand fires an "input" event by itself, so handleInput runs next.

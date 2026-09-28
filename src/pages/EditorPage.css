@@ -1,15 +1,37 @@
 .editor-page {
   display: flex;
   flex-direction: column;
+  height: 100vh; /* the page itself never scrolls: the sidebar and the editor scroll on their own */
   min-height: 100vh;
   background-color: var(--color-bg);
   position: relative;
 }
 
-.editor-page-main {
+/* files panel (left) + editor (right) */
+.editor-body {
   flex: 1;
   display: flex;
+  min-height: 0;
+}
+
+.editor-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.editor-sidebar-hidden {
+  display: none;
+}
+
+.editor-page-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding: 24px;
   overflow-y: auto;
 }
@@ -71,11 +93,11 @@
   100% { opacity: 1; }
 }
 
-/* ===== Theme toggle button — fixed bottom-left, lifted above the footer bar ===== */
+/* ===== Theme toggle button — fixed bottom-right, lifted above the footer bar ===== */
 .theme-toggle-btn {
   position: fixed;
   bottom: 50px;
-  left: 10px;
+  right: 16px;
   width: 44px;
   height: 44px;
   border-radius: 50%;

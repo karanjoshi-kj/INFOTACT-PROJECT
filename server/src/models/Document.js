@@ -33,7 +33,14 @@ const documentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    
+
+    // Which folder this document lives in (null = top level of the explorer)
+    folder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Folder",
+      default: null,
+    },
+
     html: { type: String, default: null },
 
     children: {

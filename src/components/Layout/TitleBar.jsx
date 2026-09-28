@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import './TitleBar.css'
 
-function TitleBar({ title, onTitleChange, user, onLogout }) {
+const SidebarIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="9" y1="3" x2="9" y2="21" />
+  </svg>
+)
+
+function TitleBar({ title, onTitleChange, user, onLogout, sidebarOpen, onToggleSidebar }) {
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
 
@@ -34,6 +41,18 @@ function TitleBar({ title, onTitleChange, user, onLogout }) {
   return (
     <header className="title-bar">
       <div className="title-bar-left">
+        {onToggleSidebar && (
+          <button
+            type="button"
+            className={`title-bar-sidebar-btn ${sidebarOpen ? 'on' : ''}`}
+            onClick={onToggleSidebar}
+            aria-label={sidebarOpen ? 'Hide files panel' : 'Show files panel'}
+            aria-pressed={!!sidebarOpen}
+            title={sidebarOpen ? 'Hide files panel' : 'Show files panel'}
+          >
+            <SidebarIcon />
+          </button>
+        )}
         <span className="title-bar-logo">SyncDoc</span>
         {editing ? (
           <input
