@@ -111,7 +111,7 @@ function EditorPage() {
 
       <main className="editor-page-main">
         <div className="editor-container">
-          <Editor onChange={handleContentChange} />
+          <Editor onChange={handleContentChange} documentId="shared-doc" />
         </div>
       </main>
 
