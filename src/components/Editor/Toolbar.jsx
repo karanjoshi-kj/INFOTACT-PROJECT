@@ -179,6 +179,166 @@ function Menu({ renderTrigger, children, align = 'left' }) {
 const LANGUAGES = ['JavaScript', 'TypeScript', 'Python', 'Java', 'C++', 'HTML', 'CSS', 'JSON', 'SQL', 'Bash']
 const ZOOM_LEVELS = [50, 75, 90, 100, 110, 125, 150, 200]
 
+// Every formula the spreadsheet understands: [name, template, short description]
+const FORMULA_GROUPS = [
+  [
+    'Math & statistics',
+    [
+      ['SUM', '=SUM(A1:A5)', 'Add numbers'],
+      ['AVERAGE', '=AVERAGE(A1:A5)', 'Mean of numbers'],
+      ['MIN', '=MIN(A1:A5)', 'Smallest number'],
+      ['MAX', '=MAX(A1:A5)', 'Largest number'],
+      ['COUNT', '=COUNT(A1:A5)', 'Count numbers'],
+      ['COUNTA', '=COUNTA(A1:A5)', 'Count non-empty cells'],
+      ['PRODUCT', '=PRODUCT(A1:A5)', 'Multiply numbers'],
+      ['MEDIAN', '=MEDIAN(A1:A5)', 'Middle value'],
+      ['MODE', '=MODE(A1:A5)', 'Most common value'],
+      ['STDEV', '=STDEV(A1:A5)', 'Standard deviation'],
+      ['VAR', '=VAR(A1:A5)', 'Variance'],
+      ['ROUND', '=ROUND(A1,2)', 'Round to digits'],
+      ['ROUNDUP', '=ROUNDUP(A1,2)', 'Round up'],
+      ['ROUNDDOWN', '=ROUNDDOWN(A1,2)', 'Round down'],
+      ['ABS', '=ABS(A1)', 'Absolute value'],
+      ['SQRT', '=SQRT(A1)', 'Square root'],
+      ['POWER', '=POWER(A1,2)', 'Raise to a power'],
+      ['MOD', '=MOD(A1,2)', 'Remainder'],
+      ['INT', '=INT(A1)', 'Round down to whole number'],
+      ['CEILING', '=CEILING(A1,1)', 'Round up to a multiple'],
+      ['FLOOR', '=FLOOR(A1,1)', 'Round down to a multiple'],
+      ['PI', '=PI()', 'The number pi'],
+    ],
+  ],
+  [
+    'Logical',
+    [
+      ['IF', '=IF(A1>0,"Yes","No")', 'Choose by a condition'],
+      ['AND', '=AND(A1>0,B1>0)', 'All conditions true'],
+      ['OR', '=OR(A1>0,B1>0)', 'Any condition true'],
+      ['NOT', '=NOT(A1>0)', 'Reverse a condition'],
+      ['IFERROR', '=IFERROR(A1/B1,0)', 'Value if there is an error'],
+    ],
+  ],
+  [
+    'Conditional',
+    [
+      ['SUMIF', '=SUMIF(A1:A5,">0",B1:B5)', 'Add if condition matches'],
+      ['COUNTIF', '=COUNTIF(A1:A5,">0")', 'Count if condition matches'],
+      ['AVERAGEIF', '=AVERAGEIF(A1:A5,">0",B1:B5)', 'Average if condition matches'],
+    ],
+  ],
+  [
+    'Text',
+    [
+      ['CONCAT', '=CONCAT(A1,B1)', 'Join text'],
+      ['LEN', '=LEN(A1)', 'Length of text'],
+      ['UPPER', '=UPPER(A1)', 'UPPER CASE'],
+      ['LOWER', '=LOWER(A1)', 'lower case'],
+      ['TRIM', '=TRIM(A1)', 'Remove extra spaces'],
+      ['LEFT', '=LEFT(A1,3)', 'First characters'],
+      ['RIGHT', '=RIGHT(A1,3)', 'Last characters'],
+      ['MID', '=MID(A1,2,3)', 'Middle characters'],
+    ],
+  ],
+  [
+    'Lookup',
+    [
+      ['VLOOKUP', '=VLOOKUP(A1,A1:C5,2,FALSE)', 'Look up down a column'],
+      ['HLOOKUP', '=HLOOKUP(A1,A1:E3,2,FALSE)', 'Look up across a row'],
+      ['INDEX', '=INDEX(A1:C5,2,2)', 'Cell at row and column'],
+      ['MATCH', '=MATCH(A1,A1:A5,0)', 'Position of a value'],
+    ],
+  ],
+  [
+    'Date',
+    [
+      ['TODAY', '=TODAY()', "Today's date"],
+      ['NOW', '=NOW()', 'Date and time'],
+    ],
+  ],
+]
+
+// The formula bar: selected cell, a list of formulas, and the formula text box
+function FormulaBar({ cell, onApply }) {
+  const [draft, setDraft] = useState('')
+  const [focused, setFocused] = useState(false)
+  const inputRef = useRef(null)
+  const cellRef = cell ? cell.ref : ''
+  const cellContent = cell ? cell.content : ''
+
+  // Show the selected cell's formula / value (unless you are typing in the bar)
+  useEffect(() => {
+    if (!focused) setDraft(cellContent)
+  }, [cellRef, cellContent, focused])
+
+  const apply = () => {
+    if (onApply) onApply(draft)
+  }
+
+  return (
+    <div className="formula-bar">
+      <span className="formula-cell-ref" title="Selected cell">
+        {cellRef || '—'}
+      </span>
+
+      <select
+        className="ctx-select formula-select"
+        value=""
+        aria-label="Choose a formula"
+        title="Choose a formula"
+        onChange={(e) => {
+          const value = e.target.value
+          if (!value) return
+          setDraft(value)
+          if (inputRef.current) inputRef.current.focus()
+        }}
+      >
+        <option value="">Formulas</option>
+        {FORMULA_GROUPS.map(([group, items]) => (
+          <optgroup key={group} label={group}>
+            {items.map(([name, template, desc]) => (
+              <option key={name} value={template}>
+                {name} – {desc}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+
+      <span className="formula-fx" aria-hidden="true">fx</span>
+      <input
+        ref={inputRef}
+        className="formula-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            apply()
+          } else if (e.key === 'Escape') {
+            setDraft(cellContent)
+            e.target.blur()
+          }
+        }}
+        placeholder="Select a cell, then type =SUM(A1:A3)"
+        spellCheck={false}
+        autoComplete="off"
+        aria-label="Formula bar"
+      />
+      <button
+        type="button"
+        className="ctx-btn primary formula-apply"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={apply}
+        title="Put this in the selected cell (Enter)"
+      >
+        Apply
+      </button>
+    </div>
+  )
+}
+
 const blockLabelFromBrowser = (value) => {
   const v = String(value || '').toLowerCase().replace(/[<>]/g, '')
   if (v === 'h1') return 'Heading 1'
@@ -194,6 +354,8 @@ function Toolbar({
   onCodeLanguage,
   onInsertSheet,
   onSheetAction,
+  sheetCell = null,
+  onFormulaApply,
   codeLang = 'JavaScript',
   zoom = 100,
   onZoomChange,
@@ -316,6 +478,7 @@ function Toolbar({
                 <TableIcon />
                 <span>Insert spreadsheet</span>
               </button>
+              <FormulaBar cell={sheetCell} onApply={onFormulaApply} />
               <button type="button" className="ctx-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => onSheetAction && onSheetAction('addRow')}>
                 <PlusIcon />
                 <span>Row</span>

@@ -6,9 +6,15 @@ import './Editor.css'
 
 const WS_URL = 'ws://localhost:1234'
 
-const USER_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6']
+// The host always gets this colour. Collaborators get one of the colours below
+// (one each - the room keeps them from repeating).
+const HOST_COLOR = '#f59e0b'
+const USER_COLORS = [
+  '#6366f1', '#ec4899', '#10b981', '#3b82f6', '#8b5cf6',
+  '#ef4444', '#14b8a6', '#a855f7', '#06b6d4', '#84cc16',
+]
 
-// Same name -> same colour, so a person keeps their colour everywhere
+// Same name -> same colour (only used until the room hands out a unique colour)
 const colorFor = (name = '') => {
   let h = 0
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
@@ -16,6 +22,9 @@ const colorFor = (name = '') => {
 }
 
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const initialsOf = (name = '') =>
+  name.split(' ').filter(Boolean).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || '?'
 
 // ---------------------------------------------------------------
 // SPREADSHEET HELPERS
@@ -45,67 +54,495 @@ function getSheetCell(table, ref) {
   return tr ? tr.cells[col + 1] || null : null // +1 because the first cell is the row number
 }
 
-// Calculates things like =SUM(A1:A3)+B2*2 . Supports + - * / ( ) cell refs and
-// SUM, AVERAGE (or AVG), MIN, MAX, COUNT.
-function evaluateFormula(table, formula) {
-  let expr = formula.trim().slice(1).toUpperCase()
+// ---------------------------------------------------------------
+// FORMULA ENGINE
+// Supports + - * / ^ & % ( ) comparisons (= <> < > <= >=), cell refs (A1),
+// ranges (A1:B5), numbers, "text" and these functions:
+//   Math/stats : SUM AVERAGE AVG MIN MAX COUNT COUNTA PRODUCT MEDIAN MODE STDEV VAR
+//                ROUND ROUNDUP ROUNDDOWN ABS SQRT POWER MOD INT CEILING FLOOR PI
+//   Logical    : IF AND OR NOT IFERROR
+//   Conditional: SUMIF COUNTIF AVERAGEIF
+//   Text       : CONCAT CONCATENATE LEN UPPER LOWER TRIM LEFT RIGHT MID
+//   Lookup     : VLOOKUP HLOOKUP INDEX MATCH
+//   Date       : TODAY NOW
+// Nothing is run with eval/Function, so nothing unsafe can execute.
+// ---------------------------------------------------------------
+const FORMULA_TOKEN =
+  /\s*(?:(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+)|"((?:[^"]|"")*)"|([A-Za-z]\d+:[A-Za-z]\d+)|([A-Za-z]\d+)(?![A-Za-z0-9_(])|([A-Za-z_][A-Za-z0-9_.]*)|(<=|>=|<>|[-+*/^&=<>%(),]))/y
 
-  const cellNumber = (ref) => {
+function tokenizeFormula(src) {
+  const tokens = []
+  const re = new RegExp(FORMULA_TOKEN.source, 'y')
+  let pos = 0
+  while (pos < src.length) {
+    if (!src.slice(pos).trim()) break
+    re.lastIndex = pos
+    const m = re.exec(src)
+    if (!m) throw new Error('bad token')
+    pos = re.lastIndex
+    if (m[1] !== undefined) tokens.push({ t: 'num', v: parseFloat(m[1]) })
+    else if (m[2] !== undefined) tokens.push({ t: 'str', v: m[2].replace(/""/g, '"') })
+    else if (m[3]) tokens.push({ t: 'range', v: m[3].toUpperCase() })
+    else if (m[4]) tokens.push({ t: 'ref', v: m[4].toUpperCase() })
+    else if (m[5]) tokens.push({ t: 'id', v: m[5].toUpperCase() })
+    else tokens.push({ t: 'op', v: m[6] })
+  }
+  return tokens
+}
+
+function parseFormula(tokens) {
+  let i = 0
+  const isOp = (v) => tokens[i] && tokens[i].t === 'op' && tokens[i].v === v
+  const eat = (v) => {
+    if (!isOp(v)) throw new Error(`expected ${v}`)
+    i++
+  }
+
+  const parseCompare = () => {
+    let left = parseConcat()
+    while (tokens[i] && tokens[i].t === 'op' && ['=', '<>', '<', '>', '<=', '>='].includes(tokens[i].v)) {
+      const op = tokens[i++].v
+      left = { t: 'bin', op, l: left, r: parseConcat() }
+    }
+    return left
+  }
+  const parseConcat = () => {
+    let left = parseAdd()
+    while (isOp('&')) {
+      i++
+      left = { t: 'bin', op: '&', l: left, r: parseAdd() }
+    }
+    return left
+  }
+  const parseAdd = () => {
+    let left = parseMul()
+    while (isOp('+') || isOp('-')) {
+      const op = tokens[i++].v
+      left = { t: 'bin', op, l: left, r: parseMul() }
+    }
+    return left
+  }
+  const parseMul = () => {
+    let left = parsePow()
+    while (isOp('*') || isOp('/')) {
+      const op = tokens[i++].v
+      left = { t: 'bin', op, l: left, r: parsePow() }
+    }
+    return left
+  }
+  const parsePow = () => {
+    let left = parseUnary()
+    while (isOp('^')) {
+      i++
+      left = { t: 'bin', op: '^', l: left, r: parseUnary() }
+    }
+    return left
+  }
+  const parseUnary = () => {
+    if (isOp('-')) {
+      i++
+      return { t: 'neg', e: parseUnary() }
+    }
+    if (isOp('+')) {
+      i++
+      return parseUnary()
+    }
+    return parsePostfix()
+  }
+  const parsePostfix = () => {
+    let node = parsePrimary()
+    while (isOp('%')) {
+      i++
+      node = { t: 'pct', e: node }
+    }
+    return node
+  }
+  const parsePrimary = () => {
+    const tk = tokens[i++]
+    if (!tk) throw new Error('unexpected end')
+    if (tk.t === 'num' || tk.t === 'str') return { t: 'lit', v: tk.v }
+    if (tk.t === 'ref') return { t: 'ref', ref: tk.v }
+    if (tk.t === 'range') return { t: 'range', range: tk.v }
+    if (tk.t === 'id') {
+      if (isOp('(')) {
+        i++
+        const args = []
+        if (!isOp(')')) {
+          for (;;) {
+            args.push(parseCompare())
+            if (isOp(',')) {
+              i++
+              continue
+            }
+            break
+          }
+        }
+        eat(')')
+        return { t: 'fn', name: tk.v, args }
+      }
+      if (tk.v === 'TRUE') return { t: 'lit', v: true }
+      if (tk.v === 'FALSE') return { t: 'lit', v: false }
+      throw new Error('unknown name')
+    }
+    if (tk.t === 'op' && tk.v === '(') {
+      const inner = parseCompare()
+      eat(')')
+      return inner
+    }
+    throw new Error('unexpected token')
+  }
+
+  const ast = parseCompare()
+  if (i < tokens.length) throw new Error('unexpected extra input')
+  return ast
+}
+
+const pad2 = (x) => String(x).padStart(2, '0')
+const todayText = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+const nowText = () => {
+  const d = new Date()
+  return `${todayText()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+// Calculates things like =SUM(A1:A3)+B2*2 or =IF(A1>5,"big","small")
+function evaluateFormula(table, formula) {
+  // Value of one cell: number, text, or null when empty
+  const rawCell = (ref) => {
     const cell = getSheetCell(table, ref)
     if (!cell) return null
-    const v = parseFloat(cell.textContent.replace(/,/g, ''))
-    return Number.isNaN(v) ? null : v
+    const text = cell.textContent.trim()
+    if (text === '') return null
+    const n = Number(text.replace(/,/g, ''))
+    return Number.isNaN(n) ? text : n
   }
 
-  const collect = (arg) => {
-    arg = arg.trim()
-    const range = arg.match(/^([A-Z])(\d+):([A-Z])(\d+)$/)
-    if (range) {
-      const c1 = range[1].charCodeAt(0)
-      const c2 = range[3].charCodeAt(0)
-      const r1 = parseInt(range[2], 10)
-      const r2 = parseInt(range[4], 10)
-      const out = []
-      for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
-        for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
-          const v = cellNumber(String.fromCharCode(c) + r)
-          if (v !== null) out.push(v)
-        }
+  const rangeValues = (range) => {
+    const m = range.match(/^([A-Z])(\d+):([A-Z])(\d+)$/)
+    if (!m) throw new Error('bad range')
+    const c1 = m[1].charCodeAt(0)
+    const c2 = m[3].charCodeAt(0)
+    const r1 = parseInt(m[2], 10)
+    const r2 = parseInt(m[4], 10)
+    if (Math.abs(r2 - r1) > 1000) throw new Error('range too large')
+    const rows = []
+    for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+      const row = []
+      for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) row.push(rawCell(String.fromCharCode(c) + r))
+      rows.push(row)
+    }
+    return { rows }
+  }
+
+  const isRange = (v) => !!v && typeof v === 'object' && Array.isArray(v.rows)
+  const toNum = (v) => {
+    if (isRange(v)) throw new Error('range used as a number')
+    if (v === null || v === undefined || v === '') return 0
+    if (typeof v === 'boolean') return v ? 1 : 0
+    if (typeof v === 'number') return v
+    const n = parseFloat(v)
+    return Number.isNaN(n) ? 0 : n
+  }
+  const toText = (v) => {
+    if (isRange(v)) throw new Error('range used as text')
+    if (v === null || v === undefined) return ''
+    if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
+    return String(v)
+  }
+  const truthy = (v) => {
+    if (isRange(v)) throw new Error('range used as condition')
+    if (typeof v === 'boolean') return v
+    if (typeof v === 'number') return v !== 0
+    if (typeof v === 'string') return v !== '' && v.toUpperCase() !== 'FALSE'
+    return false
+  }
+  const flat = (list) => list.flatMap((x) => (isRange(x) ? x.rows.flat() : [x]))
+  const numsOf = (list) => flat(list).filter((v) => typeof v === 'number')
+
+  const cmp = (a, b) => {
+    if (typeof a === 'string' || typeof b === 'string') {
+      const x = toText(a).toLowerCase()
+      const y = toText(b).toLowerCase()
+      return x < y ? -1 : x > y ? 1 : 0
+    }
+    const x = toNum(a)
+    const y = toNum(b)
+    return x < y ? -1 : x > y ? 1 : 0
+  }
+
+  // Criteria for SUMIF / COUNTIF / AVERAGEIF, e.g. ">5", "<>0", "apple", 3
+  const matches = (v, crit) => {
+    let op = '='
+    let rhs = crit
+    if (typeof crit === 'string') {
+      const m = crit.match(/^(<=|>=|<>|<|>|=)?(.*)$/)
+      op = m[1] || '='
+      rhs = m[2]
+      if (rhs.trim() !== '' && !Number.isNaN(Number(rhs))) rhs = Number(rhs)
+    }
+    if (v === null) return false
+    const c = cmp(v, rhs)
+    if (op === '=') return c === 0
+    if (op === '<>') return c !== 0
+    if (op === '<') return c < 0
+    if (op === '>') return c > 0
+    if (op === '<=') return c <= 0
+    return c >= 0
+  }
+
+  const findIndex = (vec, key, exact) => {
+    if (exact) return vec.findIndex((x) => x !== null && cmp(x, key) === 0)
+    let idx = -1
+    vec.forEach((x, k) => {
+      if (x !== null && cmp(x, key) <= 0) idx = k
+    })
+    return idx
+  }
+
+  const roundAway = (x) => Math.sign(x) * Math.round(Math.abs(x))
+
+  const binary = (op, a, b) => {
+    switch (op) {
+      case '+': return toNum(a) + toNum(b)
+      case '-': return toNum(a) - toNum(b)
+      case '*': return toNum(a) * toNum(b)
+      case '/': {
+        const d = toNum(b)
+        if (d === 0) throw new Error('divide by zero')
+        return toNum(a) / d
       }
-      return out
+      case '^': return Math.pow(toNum(a), toNum(b))
+      case '&': return toText(a) + toText(b)
+      case '=': return cmp(a, b) === 0
+      case '<>': return cmp(a, b) !== 0
+      case '<': return cmp(a, b) < 0
+      case '>': return cmp(a, b) > 0
+      case '<=': return cmp(a, b) <= 0
+      case '>=': return cmp(a, b) >= 0
+      default: throw new Error('bad operator')
     }
-    if (/^[A-Z]\d+$/.test(arg)) {
-      const v = cellNumber(arg)
-      return v === null ? [] : [v]
-    }
-    const n = parseFloat(arg)
-    return Number.isNaN(n) ? [] : [n]
   }
 
-  expr = expr.replace(/(SUM|AVERAGE|AVG|MIN|MAX|COUNT)\(([^()]*)\)/g, (_, fn, args) => {
-    const vals = args.split(',').flatMap(collect)
-    const sum = vals.reduce((a, b) => a + b, 0)
-    let result
-    if (fn === 'SUM') result = sum
-    else if (fn === 'AVERAGE' || fn === 'AVG') result = vals.length ? sum / vals.length : 0
-    else if (fn === 'MIN') result = vals.length ? Math.min(...vals) : 0
-    else if (fn === 'MAX') result = vals.length ? Math.max(...vals) : 0
-    else result = vals.length
-    return `(${result})`
-  })
+  const callFn = (name, argNodes) => {
+    // IF and IFERROR only calculate the branch they need
+    if (name === 'IF') {
+      if (argNodes.length < 2) throw new Error('IF needs 2+ arguments')
+      if (truthy(ev(argNodes[0]))) return ev(argNodes[1])
+      return argNodes[2] ? ev(argNodes[2]) : false
+    }
+    if (name === 'IFERROR') {
+      try {
+        const v = ev(argNodes[0])
+        if (typeof v === 'number' && !Number.isFinite(v)) throw new Error('not finite')
+        return v
+      } catch {
+        return argNodes[1] ? ev(argNodes[1]) : ''
+      }
+    }
 
-  expr = expr.replace(/\b([A-Z])(\d+)\b/g, (_, c, r) => {
-    const v = cellNumber(c + r)
-    return `(${v === null ? 0 : v})`
-  })
+    const a = argNodes.map(ev)
+    const n = (k, d = 0) => (a[k] === undefined ? d : toNum(a[k]))
 
-  // Only digits and + - * / ( ) . are allowed past this point, so nothing unsafe can run
-  if (!/^[0-9+\-*/().\s]+$/.test(expr)) return '#ERROR'
+    switch (name) {
+      // ----- math & statistics -----
+      case 'SUM': return numsOf(a).reduce((x, y) => x + y, 0)
+      case 'AVERAGE':
+      case 'AVG': {
+        const v = numsOf(a)
+        return v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0
+      }
+      case 'MIN': {
+        const v = numsOf(a)
+        return v.length ? Math.min(...v) : 0
+      }
+      case 'MAX': {
+        const v = numsOf(a)
+        return v.length ? Math.max(...v) : 0
+      }
+      case 'COUNT': return numsOf(a).length
+      case 'COUNTA': return flat(a).filter((v) => v !== null && v !== '').length
+      case 'PRODUCT': {
+        const v = numsOf(a)
+        return v.length ? v.reduce((x, y) => x * y, 1) : 0
+      }
+      case 'MEDIAN': {
+        const v = numsOf(a).sort((x, y) => x - y)
+        if (!v.length) throw new Error('no numbers')
+        const mid = Math.floor(v.length / 2)
+        return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2
+      }
+      case 'MODE': {
+        const counts = new Map()
+        numsOf(a).forEach((x) => counts.set(x, (counts.get(x) || 0) + 1))
+        let best = null
+        let bestCount = 1
+        counts.forEach((count, x) => {
+          if (count > bestCount) {
+            best = x
+            bestCount = count
+          }
+        })
+        if (best === null) throw new Error('no mode')
+        return best
+      }
+      case 'VAR':
+      case 'STDEV': {
+        const v = numsOf(a)
+        if (v.length < 2) throw new Error('need 2 numbers')
+        const mean = v.reduce((x, y) => x + y, 0) / v.length
+        const variance = v.reduce((x, y) => x + (y - mean) ** 2, 0) / (v.length - 1)
+        return name === 'VAR' ? variance : Math.sqrt(variance)
+      }
+      case 'ROUND': {
+        const f = Math.pow(10, n(1))
+        return roundAway(n(0) * f) / f
+      }
+      case 'ROUNDUP': {
+        const f = Math.pow(10, n(1))
+        return (Math.sign(n(0)) * Math.ceil(Math.abs(n(0)) * f)) / f
+      }
+      case 'ROUNDDOWN': {
+        const f = Math.pow(10, n(1))
+        return (Math.sign(n(0)) * Math.floor(Math.abs(n(0)) * f)) / f
+      }
+      case 'ABS': return Math.abs(n(0))
+      case 'SQRT': {
+        if (n(0) < 0) throw new Error('negative sqrt')
+        return Math.sqrt(n(0))
+      }
+      case 'POWER': return Math.pow(n(0), n(1))
+      case 'MOD': {
+        const d = n(1)
+        if (d === 0) throw new Error('mod by zero')
+        return ((n(0) % d) + d) % d
+      }
+      case 'INT': return Math.floor(n(0))
+      case 'CEILING': {
+        const s = n(1, 1)
+        return s === 0 ? 0 : Math.ceil(n(0) / s) * s
+      }
+      case 'FLOOR': {
+        const s = n(1, 1)
+        return s === 0 ? 0 : Math.floor(n(0) / s) * s
+      }
+      case 'PI': return Math.PI
+
+      // ----- logical -----
+      case 'AND': return flat(a).every(truthy)
+      case 'OR': return flat(a).some(truthy)
+      case 'NOT': return !truthy(a[0])
+
+      // ----- conditional -----
+      case 'SUMIF':
+      case 'COUNTIF':
+      case 'AVERAGEIF': {
+        const rng = flat([a[0]])
+        const target = name === 'COUNTIF' ? null : flat([a[2] === undefined ? a[0] : a[2]])
+        let total = 0
+        let count = 0
+        let numeric = 0
+        rng.forEach((v, k) => {
+          if (!matches(v, a[1])) return
+          count++
+          if (target && typeof target[k] === 'number') {
+            total += target[k]
+            numeric++
+          }
+        })
+        if (name === 'COUNTIF') return count
+        if (name === 'SUMIF') return total
+        if (!numeric) throw new Error('nothing to average')
+        return total / numeric
+      }
+
+      // ----- text -----
+      case 'CONCAT':
+      case 'CONCATENATE': return flat(a).map(toText).join('')
+      case 'LEN': return toText(a[0]).length
+      case 'UPPER': return toText(a[0]).toUpperCase()
+      case 'LOWER': return toText(a[0]).toLowerCase()
+      case 'TRIM': return toText(a[0]).trim().replace(/\s+/g, ' ')
+      case 'LEFT': return toText(a[0]).slice(0, Math.max(0, n(1, 1)))
+      case 'RIGHT': {
+        const s = toText(a[0])
+        return s.slice(Math.max(0, s.length - Math.max(0, n(1, 1))))
+      }
+      case 'MID': {
+        const start = Math.max(1, n(1, 1))
+        return toText(a[0]).slice(start - 1, start - 1 + Math.max(0, n(2, 0)))
+      }
+
+      // ----- lookup -----
+      case 'VLOOKUP': {
+        if (!isRange(a[1])) throw new Error('range needed')
+        const rows = a[1].rows
+        const col = n(2, 1)
+        if (col < 1 || col > rows[0].length) throw new Error('column out of range')
+        const exact = a[3] !== undefined && !truthy(a[3])
+        const idx = findIndex(rows.map((r) => r[0]), a[0], exact)
+        if (idx < 0) throw new Error('not found')
+        return rows[idx][col - 1]
+      }
+      case 'HLOOKUP': {
+        if (!isRange(a[1])) throw new Error('range needed')
+        const rows = a[1].rows
+        const rowNo = n(2, 1)
+        if (rowNo < 1 || rowNo > rows.length) throw new Error('row out of range')
+        const exact = a[3] !== undefined && !truthy(a[3])
+        const idx = findIndex(rows[0], a[0], exact)
+        if (idx < 0) throw new Error('not found')
+        return rows[rowNo - 1][idx]
+      }
+      case 'INDEX': {
+        if (!isRange(a[0])) throw new Error('range needed')
+        const rows = a[0].rows
+        let r = n(1, 1)
+        let c = n(2, 1)
+        if (rows.length === 1 && a[2] === undefined) {
+          c = r
+          r = 1
+        }
+        const row = rows[r - 1]
+        if (!row || c < 1 || c > row.length) throw new Error('out of range')
+        return row[c - 1]
+      }
+      case 'MATCH': {
+        const type = n(2, 1)
+        const idx = findIndex(flat([a[1]]), a[0], type === 0)
+        if (idx < 0) throw new Error('not found')
+        return idx + 1
+      }
+
+      // ----- date -----
+      case 'TODAY': return todayText()
+      case 'NOW': return nowText()
+
+      default: throw new Error('unknown function')
+    }
+  }
+
+  const ev = (node) => {
+    switch (node.t) {
+      case 'lit': return node.v
+      case 'ref': return rawCell(node.ref)
+      case 'range': return rangeValues(node.range)
+      case 'neg': return -toNum(ev(node.e))
+      case 'pct': return toNum(ev(node.e)) / 100
+      case 'bin': return binary(node.op, ev(node.l), ev(node.r))
+      case 'fn': return callFn(node.name, node.args)
+      default: throw new Error('bad formula')
+    }
+  }
+
   try {
-    // eslint-disable-next-line no-new-func
-    const result = Function(`"use strict"; return (${expr})`)()
-    if (typeof result !== 'number' || !Number.isFinite(result)) return '#ERROR'
-    return String(Math.round(result * 1e6) / 1e6)
+    const ast = parseFormula(tokenizeFormula(formula.trim().slice(1)))
+    const value = ev(ast)
+    if (isRange(value)) return '#ERROR'
+    if (typeof value === 'number') return Number.isFinite(value) ? String(Math.round(value * 1e6) / 1e6) : '#ERROR'
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+    return value === null || value === undefined ? '' : String(value)
   } catch {
     return '#ERROR'
   }
@@ -119,6 +556,62 @@ function recomputeSheet(table) {
     })
   }
 }
+
+// What the formula bar shows for a cell: its label (B3) and its formula / value
+function describeCell(td) {
+  const row = td.parentElement ? td.parentElement.rowIndex : 0
+  return {
+    ref: colLetter(Math.max(0, td.cellIndex - 1)) + row,
+    content: td.dataset.formula || td.textContent,
+  }
+}
+
+// ---------------------------------------------------------------
+// AUTHORSHIP HELPERS
+// Every "unit" (paragraph / heading / list item / table cell / code block) that a
+// person adds or changes is stamped with that person's id, name and colour.
+// ---------------------------------------------------------------
+const BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'UL', 'OL', 'PRE', 'TABLE', 'HR', 'BLOCKQUOTE'])
+
+// Loose text typed straight into the editor gets wrapped in a <div> (so it can carry a colour)
+function wrapLooseNodes(root) {
+  const sel = window.getSelection()
+  const range = sel && sel.rangeCount && root.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null
+  let run = null
+  let moved = false
+  Array.from(root.childNodes).forEach((node) => {
+    if (node.nodeType === 1 && BLOCK_TAGS.has(node.tagName)) {
+      run = null
+      return
+    }
+    if (node.nodeType === 8) return
+    if (node.nodeType === 3 && !node.textContent.trim() && !run) return
+    if (!run) {
+      run = document.createElement('div')
+      root.insertBefore(run, node)
+    }
+    run.appendChild(node)
+    moved = true
+  })
+  if (moved && range && range.startContainer !== root && range.endContainer !== root) {
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+}
+
+// The pieces of the document that can carry an author colour
+function authorUnits(root) {
+  const out = []
+  Array.from(root.children).forEach((node) => {
+    const tag = node.tagName
+    if (tag === 'UL' || tag === 'OL') Array.from(node.children).forEach((li) => out.push(li))
+    else if (tag === 'TABLE') node.querySelectorAll('td').forEach((td) => out.push(td))
+    else if (tag !== 'HR' && tag !== 'BR') out.push(node)
+  })
+  return out
+}
+
+const unitSig = (unit) => `${unit.tagName}|${unit.innerHTML}`
 
 // Turns an image file into a small JPEG data URL so it can live inside the document
 function readImageAsDataUrl(file) {
@@ -148,14 +641,17 @@ function readImageAsDataUrl(file) {
 
 // roomCode decides which live "room" this editor syncs to - everyone using the
 // same room code edits the same shared document.
+// role: 'host' (created the room) or 'collab' (joined it - needs the host's approval)
 function Editor({
   initialHtml = '',
   onChange,
   onRemoteChange,
   onPresenceChange,
   onNotify,
+  onAccessChange,
   user,
   roomCode = '',
+  role = 'host',
   documentId = 'shared-doc',
 }) {
   const roomName = roomCode ? `syncdoc-room-${roomCode}` : documentId
@@ -168,6 +664,8 @@ function Editor({
   onPresenceRef.current = onPresenceChange
   const onNotifyRef = useRef(onNotify)
   onNotifyRef.current = onNotify
+  const onAccessRef = useRef(onAccessChange)
+  onAccessRef.current = onAccessChange
 
   const ydocRef = useRef(null)
   const ytextRef = useRef(null)
@@ -176,13 +674,66 @@ function Editor({
   const lastHtmlRef = useRef('') // last html we sent/received, to skip pointless syncs
   const savedRangeRef = useRef(null) // where the caret was, for toolbar buttons / file dialogs
   const currentCellRef = useRef(null) // spreadsheet cell the caret is in
+  const activeCellRef = useRef(null) // last spreadsheet cell used (kept for the formula bar)
   const codeLangRef = useRef('JavaScript')
+
+  const accessRef = useRef(role === 'host' ? 'granted' : 'pending') // 'granted' | 'pending' | 'denied'
+  const selfRef = useRef({ id: 'guest', name: 'Guest', color: HOST_COLOR, role: 'host' })
+  const unitSigsRef = useRef([]) // fingerprints of every unit, to see which ones a person changed
+  const decideRef = useRef(null) // host: (request, allow) => approve / deny a join request
+  const notifiedRef = useRef(new Set()) // join requests the host was already told about
 
   const [zoom, setZoom] = useState(100)
   const [codeLang, setCodeLang] = useState('JavaScript')
+  const [access, setAccess] = useState(role === 'host' ? 'granted' : 'pending')
+  const [pending, setPending] = useState([]) // host: people waiting to be let in
+  const [people, setPeople] = useState([]) // everyone allowed in the room (for the colour key)
+  const [sheetCell, setSheetCell] = useState(null) // { ref, content } shown in the formula bar
 
   const notify = (message, type = 'info') => {
     if (onNotifyRef.current) onNotifyRef.current(message, type)
+  }
+
+  // Remember what every unit looks like right now (after loading / receiving content)
+  const snapshotUnits = () => {
+    const el = editorRef.current
+    unitSigsRef.current = el ? authorUnits(el).map(unitSig) : []
+  }
+
+  // Stamp the units that changed since the last snapshot with the current person's colour
+  const stampAuthorship = () => {
+    const el = editorRef.current
+    if (!el) return
+    const units = authorUnits(el)
+    const sigs = units.map(unitSig)
+    const prev = unitSigsRef.current
+
+    let start = 0
+    while (start < sigs.length && start < prev.length && sigs[start] === prev[start]) start++
+    let endCur = sigs.length
+    let endPrev = prev.length
+    while (endCur > start && endPrev > start && sigs[endCur - 1] === prev[endPrev - 1]) {
+      endCur--
+      endPrev--
+    }
+
+    const pool = new Map()
+    for (let k = start; k < endPrev; k++) pool.set(prev[k], (pool.get(prev[k]) || 0) + 1)
+
+    const me = selfRef.current
+    for (let k = start; k < endCur; k++) {
+      const left = pool.get(sigs[k])
+      if (left) {
+        pool.set(sigs[k], left - 1) // this unit only moved, it was not changed
+        continue
+      }
+      const unit = units[k]
+      unit.setAttribute('data-author', me.id)
+      unit.setAttribute('data-author-name', me.name)
+      unit.setAttribute('title', `Edited by ${me.name}`)
+      unit.style.setProperty('--author-color', me.color)
+    }
+    unitSigsRef.current = sigs
   }
 
   // Set up the shared Yjs document + WebSocket connection (again whenever the room changes)
@@ -190,10 +741,26 @@ function Editor({
     const ydoc = new Y.Doc()
     const provider = new WebsocketProvider(WS_URL, roomName, ydoc)
     const ytext = ydoc.getText('content')
+    const approvals = ydoc.getMap('approvals') // userId -> { status: 'approved' | 'denied', ... }
+    const colors = ydoc.getMap('colors') // userId -> colour (one per person, no repeats)
 
     ydocRef.current = ydoc
     ytextRef.current = ytext
     providerRef.current = provider
+
+    const isHost = role === 'host'
+    const myName = (user && user.name) || 'Guest'
+    const myId = String((user && (user.id || user._id || user.email || user.name)) || 'guest')
+    const myRequest = Date.now() // identifies this join attempt
+    let synced = false
+
+    selfRef.current = {
+      id: myId,
+      name: myName,
+      color: isHost ? HOST_COLOR : colorFor(myName),
+      role: isHost ? 'host' : 'collab',
+    }
+    accessRef.current = isHost ? 'granted' : 'pending'
 
     // Show the content loaded from MongoDB right away, so the document is
     // visible (and safe) even before / without the live-sync connection.
@@ -201,18 +768,129 @@ function Editor({
       editorRef.current.innerHTML = initialHtml
       lastHtmlRef.current = editorRef.current.innerHTML
     }
+    snapshotUnits()
+
+    // Put the shared text on screen (only people who are allowed in see it)
+    const loadSharedIntoDom = () => {
+      const el = editorRef.current
+      if (!el || ytext.length === 0) return
+      const html = ytext.toString()
+      if (el.innerHTML !== html) {
+        el.innerHTML = html
+        lastHtmlRef.current = el.innerHTML
+        snapshotUnits()
+        if (onRemoteChangeRef.current) {
+          onRemoteChangeRef.current({ html: el.innerHTML, text: el.innerText })
+        }
+      }
+    }
 
     // ---- who is in the room (live collaborator list) ----
-    const myName = (user && user.name) || 'Guest'
-    provider.awareness.setLocalStateField('user', { name: myName, color: colorFor(myName) })
+    const publishSelf = () => {
+      provider.awareness.setLocalStateField('user', { ...selfRef.current })
+    }
+    publishSelf()
+    if (!isHost) provider.awareness.setLocalStateField('joinRequest', myRequest)
+
     const emitPresence = () => {
       const list = []
+      const waiting = []
       provider.awareness.getStates().forEach((state, clientId) => {
-        if (state.user) list.push({ id: clientId, name: state.user.name, color: state.user.color })
+        const u = state.user
+        if (!u) return
+        const isSelf = clientId === provider.awareness.clientID
+        const rec = approvals.get(u.id)
+        const approved = rec && rec.status === 'approved'
+        if (u.role === 'host' || approved || isSelf) {
+          list.push({ id: clientId, name: u.name, color: u.color, role: u.role, isSelf })
+        } else if (isHost) {
+          const declinedThisTime = rec && rec.status === 'denied' && rec.req === state.joinRequest
+          if (!declinedThisTime) {
+            waiting.push({ clientId, id: u.id, name: u.name, color: u.color, req: state.joinRequest })
+          }
+        }
       })
+      list.sort((a, b) => (b.role === 'host') - (a.role === 'host')) // host first
+      setPeople(list)
       if (onPresenceRef.current) onPresenceRef.current(list)
+      if (isHost) {
+        setPending(waiting)
+        waiting.forEach((p) => {
+          const key = `${p.id}:${p.req}`
+          if (!notifiedRef.current.has(key)) {
+            notifiedRef.current.add(key)
+            notify(`${p.name} wants to join this room`)
+          }
+        })
+      }
     }
+
+    // ---- the host's answer to a join request ----
+    const evalAccess = () => {
+      let next = 'granted'
+      if (!isHost) {
+        const rec = approvals.get(myId)
+        if (rec && rec.status === 'approved') next = 'granted'
+        else if (rec && rec.status === 'denied' && rec.req === myRequest) next = 'denied'
+        else next = 'pending'
+      }
+      const before = accessRef.current
+      accessRef.current = next
+      setAccess(next)
+      if (onAccessRef.current) onAccessRef.current(next)
+      if (next === 'granted' && before !== 'granted') {
+        loadSharedIntoDom()
+        notify('The host approved you - you can edit now', 'success')
+      }
+      if (next === 'denied' && before !== 'denied') notify('The host declined your request', 'error')
+    }
+
+    decideRef.current = (request, allow) => {
+      approvals.set(
+        request.id,
+        allow
+          ? { status: 'approved', name: request.name, at: Date.now() }
+          : { status: 'denied', name: request.name, req: request.req, at: Date.now() }
+      )
+      if (allow) notify(`${request.name} can now edit this document`, 'success')
+    }
+
+    // ---- one colour per person ----
+    const resolveColor = () => {
+      const mine = colors.get(myId)
+      let want
+      if (isHost) {
+        want = HOST_COLOR
+      } else {
+        const used = new Set()
+        let duplicate = false
+        colors.forEach((c, id) => {
+          if (id === myId) return
+          used.add(c)
+          if (c === mine && id < myId) duplicate = true
+        })
+        want = mine && !duplicate ? mine : USER_COLORS.find((c) => !used.has(c)) || colorFor(myName)
+      }
+      if (want !== mine) colors.set(myId, want)
+      if (selfRef.current.color !== want) {
+        selfRef.current.color = want
+        publishSelf()
+      }
+    }
+
+    const onApprovals = () => {
+      evalAccess()
+      emitPresence()
+    }
+    const onColors = () => {
+      if (synced) resolveColor()
+      emitPresence()
+    }
+
     provider.awareness.on('change', emitPresence)
+    approvals.observe(onApprovals)
+    colors.observe(onColors)
+    evalAccess()
     emitPresence()
 
     // Whenever the shared text changes (from ANY user, including this one),
@@ -223,12 +901,14 @@ function Editor({
         isLocalUpdate.current = false
         return
       }
+      if (accessRef.current !== 'granted') return // not approved yet: keep the shared text hidden
       const el = editorRef.current
       if (el) {
         const newHtml = ytext.toString()
         if (el.innerHTML !== newHtml) {
           el.innerHTML = newHtml
           lastHtmlRef.current = el.innerHTML
+          snapshotUnits()
           if (onRemoteChangeRef.current) {
             onRemoteChangeRef.current({ html: el.innerHTML, text: el.innerText })
           }
@@ -239,19 +919,13 @@ function Editor({
     ytext.observe(updateDOM)
 
     // Once connected, if the shared doc already has content, load it.
-    // If it's empty and we have initialHtml, seed it.
+    // If it's empty and we have initialHtml, seed it (the host does the seeding).
     provider.on('sync', (isSynced) => {
       if (isSynced) {
-        const el = editorRef.current
+        synced = true
         if (ytext.length > 0) {
-          if (el && el.innerHTML !== ytext.toString()) {
-            el.innerHTML = ytext.toString()
-            lastHtmlRef.current = el.innerHTML
-            if (onRemoteChangeRef.current) {
-              onRemoteChangeRef.current({ html: el.innerHTML, text: el.innerText })
-            }
-          }
-        } else if (initialHtml) {
+          if (accessRef.current === 'granted') loadSharedIntoDom()
+        } else if (initialHtml && isHost) {
           // Seed the shared doc from MongoDB (e.g. after the backend restarted).
           // The seed is built with a fixed clientID, so if two users do this at the
           // same moment, Yjs sees identical edits and merges them into ONE copy.
@@ -261,12 +935,18 @@ function Editor({
           Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(seed))
           seed.destroy()
         }
+        resolveColor()
+        evalAccess()
+        emitPresence()
       }
     })
 
     return () => {
       provider.awareness.off('change', emitPresence)
+      approvals.unobserve(onApprovals)
+      colors.unobserve(onColors)
       ytext.unobserve(updateDOM)
+      decideRef.current = null
       provider.destroy()
       ydoc.destroy()
     }
@@ -332,12 +1012,17 @@ function Editor({
   const handleInput = () => {
     const el = editorRef.current
     if (!el) return
+    if (accessRef.current !== 'granted') return // waiting for the host: read-only
 
     // After deleting everything, browsers leave a stray <br>, which hides
     // the placeholder. Clearing it brings the placeholder back.
     if (el.innerHTML === '<br>') {
       el.innerHTML = ''
     }
+
+    // Mark whatever this person just added or changed with their colour
+    wrapLooseNodes(el)
+    stampAuthorship()
 
     lastHtmlRef.current = el.innerHTML
 
@@ -352,6 +1037,10 @@ function Editor({
         ytext.insert(0, el.innerHTML)
       })
     }
+
+    // Keep the formula bar in step with the cell being typed in
+    const td = currentCellRef.current
+    if (td && el.contains(td)) setSheetCell(describeCell(td))
 
     if (onChange) {
       onChange({ html: el.innerHTML, text: el.innerText })
@@ -426,10 +1115,14 @@ function Editor({
   const handleInsertSheet = () => {
     saveSelection()
     insertHtml(buildSheetHtml(6, 5))
-    notify('Spreadsheet added. Type = in a cell for formulas, e.g. =SUM(A1:A3)')
+    notify('Spreadsheet added. Type = in a cell, or use the Formula Bar, e.g. =SUM(A1:A3)')
   }
 
   const handleSheetAction = (action) => {
+    if (accessRef.current !== 'granted') {
+      notify('You can edit once the host approves you', 'error')
+      return
+    }
     const el = getCaretElement()
     const table = el && el.closest ? el.closest('table.sheet') : null
     if (!table || !editorRef.current.contains(table)) {
@@ -459,6 +1152,36 @@ function Editor({
       for (const row of body.rows) row.insertCell().innerHTML = '<br>'
     }
     handleInput()
+  }
+
+  // Formula Bar: put the typed / chosen formula (or value) into the selected cell
+  const handleFormulaApply = (text) => {
+    if (accessRef.current !== 'granted') {
+      notify('You can edit once the host approves you', 'error')
+      return
+    }
+    const el = editorRef.current
+    const td = activeCellRef.current
+    if (!el || !td || !el.contains(td)) {
+      notify('Click inside a spreadsheet cell first', 'error')
+      return
+    }
+    const table = td.closest('table.sheet')
+    if (!table) {
+      notify('Click inside a spreadsheet cell first', 'error')
+      return
+    }
+    const value = String(text || '').trim()
+    if (value.startsWith('=')) {
+      td.dataset.formula = value
+      td.textContent = value
+    } else {
+      delete td.dataset.formula
+      td.textContent = value
+    }
+    recomputeSheet(table)
+    handleInput()
+    setSheetCell(describeCell(td))
   }
 
   // Finish editing a spreadsheet cell: "=..." becomes a formula, then everything re-calculates
@@ -491,6 +1214,13 @@ function Editor({
       if (td && td.dataset.formula) {
         td.textContent = td.dataset.formula
         placeCaretAtEnd(td)
+      }
+      if (td) {
+        activeCellRef.current = td
+        setSheetCell(describeCell(td))
+      } else {
+        activeCellRef.current = null
+        setSheetCell(null)
       }
     }
     document.addEventListener('selectionchange', onSelectionChange)
@@ -606,17 +1336,43 @@ function Editor({
         onCodeLanguage={handleCodeLanguage}
         onInsertSheet={handleInsertSheet}
         onSheetAction={handleSheetAction}
+        sheetCell={sheetCell}
+        onFormulaApply={handleFormulaApply}
         codeLang={codeLang}
         zoom={zoom}
         onZoomChange={setZoom}
       />
 
+      {/* Collaborator waiting for the host */}
+      {access !== 'granted' && (
+        <div className={`access-banner ${access}`} role="status">
+          {access === 'pending'
+            ? 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'
+            : 'The host declined your request. Use Leave to go back to your own document.'}
+        </div>
+      )}
+
+      {/* Colour key: which colour belongs to which person */}
+      {people.length > 1 && (
+        <div className="author-legend" aria-label="Who wrote what">
+          <span className="author-legend-title">Edits by</span>
+          {people.map((p) => (
+            <span key={p.id} className={`author-chip ${p.role === 'host' ? 'host' : ''}`}>
+              <i style={{ background: p.color }} />
+              {p.name}
+              {p.role === 'host' ? ' (host)' : ''}
+              {p.isSelf ? ' (you)' : ''}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="editor-scroll">
         <div
           ref={editorRef}
-          className="editor-content"
+          className={`editor-content ${access === 'granted' ? '' : 'locked'}`}
           style={{ fontSize: `${(16 * zoom) / 100}px` }}
-          contentEditable
+          contentEditable={access === 'granted'}
           suppressContentEditableWarning
           spellCheck
           data-placeholder="Start typing your document..."
@@ -637,6 +1393,41 @@ function Editor({
         style={{ display: 'none' }}
         onChange={handlePhotoSelected}
       />
+
+      {/* Host only: small corner popup to let people in */}
+      {role === 'host' && pending.length > 0 && (
+        <div className="join-popup" role="alert">
+          <div className="join-popup-title">
+            <span className="join-popup-dot" />
+            Join requests
+          </div>
+          {pending.map((p) => (
+            <div className="join-popup-item" key={`${p.clientId}-${p.req}`}>
+              <span className="join-popup-avatar" style={{ background: p.color }}>
+                {initialsOf(p.name)}
+              </span>
+              <span className="join-popup-text">
+                <b>{p.name}</b>
+                <small>wants to join this room</small>
+              </span>
+              <button
+                type="button"
+                className="join-popup-deny"
+                onClick={() => decideRef.current && decideRef.current(p, false)}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="join-popup-allow"
+                onClick={() => decideRef.current && decideRef.current(p, true)}
+              >
+                Allow
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

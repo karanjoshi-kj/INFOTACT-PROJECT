@@ -330,6 +330,106 @@
   transform: translateY(-1px);
 }
 
+/* ===== Collab Files (documents you share or joined) ===== */
+.sidebar-collab-section {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 8px;
+  padding: 0 4px;
+}
+
+.sidebar-collab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 6px 8px;
+}
+
+.sidebar-collab-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.sidebar-collab-count {
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.collab-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.collab-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.collab-file svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.collab-file:hover {
+  background: var(--color-primary-lighter);
+  color: var(--color-primary);
+}
+
+.collab-file.active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.collab-file .panel-item-label b {
+  font-weight: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collab-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.collab-host-badge {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #fff;
+  flex-shrink: 0;
+}
+
 /* ===== Files & Documents (FileExplorer, restyled with CSS only) ===== */
 .sidebar-files-section {
   flex: 1;

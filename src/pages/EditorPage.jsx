@@ -10,6 +10,8 @@ import './EditorPage.css'
 const SAVE_DELAY = 1000 // ms of no typing before we save (the "debounce")
 const RETRY_DELAY = 4000 // ms before retrying a failed save
 const RECENT_ROOMS_KEY = 'syncdoc-recent-rooms'
+const COLLAB_DOCS_KEY = 'syncdoc-collab-docs'
+const HOST_COLOR = '#f59e0b' // same host colour as the editor and title bar
 
 // ---------------------------------------------------------------
 // ICONS
@@ -95,6 +97,12 @@ const FileSmallIcon = () => (
   </Svg>
 )
 
+const CrownIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z" />
+  </svg>
+)
+
 // SyncDoc cloud logo (two overlapping clouds, blue + purple)
 const LogoIcon = () => (
   <svg width="44" height="36" viewBox="0 0 44 36" fill="none" aria-hidden="true">
@@ -146,6 +154,38 @@ const lastDocKey = (user) => `syncdoc-last-doc-${user?.id || 'anon'}`
 
 // Each document remembers its own room code
 const roomKey = (docId) => `syncdoc-room-${docId}`
+
+// Your role in a room: 'host' (you created it) or 'collab' (you joined it)
+const roleKey = (user, code) => `syncdoc-role-${user?.id || 'anon'}-${code}`
+
+const readRole = (user, code) => {
+  try {
+    const role = localStorage.getItem(roleKey(user, code))
+    return role === 'host' || role === 'collab' ? role : null
+  } catch {
+    return null
+  }
+}
+
+const writeRole = (user, code, role) => {
+  try {
+    localStorage.setItem(roleKey(user, code), role)
+  } catch {
+    // ignore storage errors
+  }
+}
+
+// Documents you share or joined (shown in "Collab Files")
+const collabKey = (user) => `${COLLAB_DOCS_KEY}-${user?.id || 'anon'}`
+
+const readCollabDocs = (user) => {
+  try {
+    const list = JSON.parse(localStorage.getItem(collabKey(user)) || '[]')
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
 
 // Generate a random room code
 function generateRoomCode() {
@@ -231,6 +271,10 @@ function EditorPage() {
   const navigate = useNavigate()
   const user = getUser()
 
+  const [roomRole, setRoomRole] = useState('host') // 'host' | 'collab' - your role in the current room
+  const [roomAccess, setRoomAccess] = useState('granted') // 'granted' | 'pending' | 'denied'
+  const [collabDocs, setCollabDocs] = useState(() => readCollabDocs(user)) // shown in "Collab Files"
+
   const collaboratorCount = Math.max(1, peers.length)
 
   // Always holds the newest { html, text } from the editor.
@@ -287,7 +331,78 @@ function EditorPage() {
   }
 
   // ---------------------------------------------------------------
-  // ROOMS (generate / copy / join)
+  // COLLAB FILES (documents you share or joined)
+  // ---------------------------------------------------------------
+  const markCollab = useCallback((role, code) => {
+    const id = docIdRef.current
+    if (!id || !code) return
+    setCollabDocs((prev) => {
+      const entry = { id, title: titleRef.current, room: code, role }
+      const existing = prev.find((e) => e.id === id)
+      if (existing && existing.room === code && existing.role === role && existing.title === entry.title) return prev
+      return existing ? prev.map((e) => (e.id === id ? entry : e)) : [entry, ...prev]
+    })
+  }, [])
+
+  const removeCollab = useCallback((id) => {
+    if (!id) return
+    setCollabDocs((prev) => (prev.some((e) => e.id === id) ? prev.filter((e) => e.id !== id) : prev))
+  }, [])
+
+  // A document becomes a collab file when you join a room, or when someone joins yours
+  useEffect(() => {
+    if (loadState !== 'ready' || !roomCode) return
+    if (roomRole === 'collab' || peers.length > 1) markCollab(roomRole, roomCode)
+  }, [loadState, roomCode, roomRole, peers.length, markCollab])
+
+  // Keep the title in the Collab Files list current
+  useEffect(() => {
+    if (!loadedDocId) return
+    setCollabDocs((prev) =>
+      prev.some((e) => e.id === loadedDocId && e.title !== title)
+        ? prev.map((e) => (e.id === loadedDocId ? { ...e, title } : e))
+        : prev
+    )
+  }, [loadedDocId, title])
+
+  // Remember the list
+  useEffect(() => {
+    try {
+      localStorage.setItem(collabKey(user), JSON.stringify(collabDocs))
+    } catch {
+      // ignore storage errors
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collabDocs])
+
+  // Drop documents that no longer exist (and refresh the names of the others)
+  useEffect(() => {
+    let cancelled = false
+    listDocuments()
+      .then((data) => {
+        if (cancelled) return
+        const docs = data.documents || []
+        setCollabDocs((prev) => {
+          const next = prev
+            .filter((e) => docs.some((d) => d._id === e.id))
+            .map((e) => {
+              const d = docs.find((x) => x._id === e.id)
+              return d && d.title !== e.title && e.id !== docIdRef.current ? { ...e, title: d.title } : e
+            })
+          return next.length === prev.length && next.every((e, k) => e === prev[k]) ? prev : next
+        })
+      })
+      .catch((err) => {
+        if (err.status === 401) goToLogin()
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId])
+
+  // ---------------------------------------------------------------
+  // ROOMS (generate / copy / join / leave)
   // ---------------------------------------------------------------
   const addRecentRoom = useCallback((code) => {
     const entry = { code, title: titleRef.current, ts: Date.now() }
@@ -301,10 +416,14 @@ function EditorPage() {
   }, [])
 
   // Switch the open document to a (new or joined) room
-  const applyRoom = (code) => {
+  const applyRoom = (code, role = 'host') => {
     // The editor restarts for the new room, so hand it the newest text (not the text from first load)
     setInitialHtml(latestContentRef.current.html)
+    setPeers([])
+    setRoomRole(role)
     setRoomCode(code)
+    writeRole(user, code, role)
+    if (role === 'host') removeCollab(docIdRef.current) // a fresh private room is not a collab file (yet)
     if (docIdRef.current) {
       try {
         localStorage.setItem(roomKey(docIdRef.current), code)
@@ -334,15 +453,33 @@ function EditorPage() {
       `Join room ${code}?\n\nThis document will show that room's live content, and your document is updated with it as soon as you edit.`
     )
     if (!ok) return false
-    applyRoom(code)
-    showToast(`Joined room ${code}`, 'success')
+    const role = readRole(user, code) || 'collab' // your own old room = host, anyone else's = collaborator
+    applyRoom(code, role)
+    showToast(
+      role === 'collab' ? `Joined room ${code} - waiting for the host to approve you` : `Joined room ${code}`,
+      'success'
+    )
     return true
   }
 
   const handleNewRoomCode = () => {
     const code = generateRoomCode()
-    applyRoom(code)
+    applyRoom(code, 'host')
     showToast(`New room ${code} is ready - share the code or link`, 'success')
+  }
+
+  // Leave the shared room and go back to your own private copy of the document
+  const handleLeaveRoom = () => {
+    if (loadState !== 'ready' || !roomCode) return
+    const question =
+      roomRole === 'host'
+        ? `Leave room ${roomCode}?\n\nYou are the host. Everyone else stays in the room, but you will go back to a private copy of this document.`
+        : `Leave room ${roomCode}?\n\nYou will go back to your own private copy of this document.`
+    if (!window.confirm(question)) return
+    if (roomAccess === 'granted') dirtyRef.current.html = true // keep the latest shared text in your own document
+    flushSave()
+    applyRoom(generateRoomCode(), 'host')
+    showToast('You left the room. This document is private again.', 'success')
   }
 
   const roomLink = () => `${window.location.origin}/editor?room=${roomCode}`
@@ -352,6 +489,7 @@ function EditorPage() {
     const ok = await copyToClipboard(roomCode)
     if (!ok) return showToast('Could not copy - please copy it by hand', 'error')
     addRecentRoom(roomCode)
+    markCollab(roomRole, roomCode)
     setRoomCodeCopied(true)
     setTimeout(() => setRoomCodeCopied(false), 2000)
   }
@@ -361,6 +499,7 @@ function EditorPage() {
     const ok = await copyToClipboard(roomLink())
     if (!ok) return showToast('Could not copy - please copy it by hand', 'error')
     addRecentRoom(roomCode)
+    markCollab(roomRole, roomCode)
     setRoomLinkCopied(true)
     setTimeout(() => setRoomLinkCopied(false), 2000)
   }
@@ -449,6 +588,7 @@ function EditorPage() {
     setLoadState('loading')
     setSaveStatus('Loading...')
     setSaveProgress(0)
+    setPeers([]) // the people of the previous document are not in this one
 
     getDocument(docId)
       .then((data) => {
@@ -464,19 +604,26 @@ function EditorPage() {
         const fromLink = cleanRoom(pendingRoomRef.current)
         pendingRoomRef.current = null
         let code = fromLink.length >= 4 ? fromLink : ''
+        let role = code ? readRole(user, code) || 'collab' : null // a link from someone else = collaborator
         if (!code) {
           try {
             code = cleanRoom(localStorage.getItem(roomKey(docId)))
           } catch {
             code = ''
           }
+          role = code.length >= 4 ? readRole(user, code) || 'host' : null
         }
-        if (code.length < 4) code = generateRoomCode()
+        if (code.length < 4) {
+          code = generateRoomCode()
+          role = 'host'
+        }
         try {
           localStorage.setItem(roomKey(docId), code)
         } catch {
           // ignore storage errors
         }
+        writeRole(user, code, role)
+        setRoomRole(role)
         setRoomCode(code)
         if (fromLink.length >= 4) {
           addRecentRoom(code)
@@ -646,6 +793,11 @@ function EditorPage() {
 
   // A file was renamed in the explorer: update the title bar if it is the open document
   const handleDocumentRenamed = (id, newTitle) => {
+    setCollabDocs((prev) =>
+      prev.some((e) => e.id === id && e.title !== newTitle)
+        ? prev.map((e) => (e.id === id ? { ...e, title: newTitle } : e))
+        : prev
+    )
     if (id !== docIdRef.current) return
     titleRef.current = newTitle
     dirtyRef.current.title = false
@@ -658,6 +810,7 @@ function EditorPage() {
     clearTimeout(retryTimerRef.current)
     dirtyRef.current = { html: false, title: false } // never save into a deleted document
     docIdRef.current = null
+    removeCollab(deletedId)
     try {
       localStorage.removeItem(lastDocKey(user))
     } catch {
@@ -805,6 +958,46 @@ function EditorPage() {
 
         <div className="sidebar-divider" />
 
+        {/* ---- Collab Files (documents you share or joined - they also stay in Files & Documents) ---- */}
+        <div className="sidebar-collab-section">
+          <div className="sidebar-collab-head">
+            <span className="sidebar-collab-title">Collab Files</span>
+            <span className="sidebar-collab-count">{collabDocs.length}</span>
+          </div>
+          <div className="collab-file-list">
+            {collabDocs.length === 0 && (
+              <p className="panel-empty">Documents you share or join with others appear here.</p>
+            )}
+            {collabDocs.map((e) => (
+              <button
+                type="button"
+                key={e.id}
+                className={`collab-file ${e.id === docId ? 'active' : ''}`}
+                onClick={() => handleOpenDocument(e.id)}
+                title={`${e.title} - room ${e.room}`}
+              >
+                <span
+                  className="collab-dot"
+                  style={{ background: e.role === 'host' ? HOST_COLOR : 'var(--color-primary)' }}
+                />
+                <FileSmallIcon />
+                <span className="panel-item-label">
+                  <b>{e.title}</b>
+                  <small>
+                    Room {e.room}
+                    {e.role === 'host' ? ' · Host' : ' · Collaborator'}
+                  </small>
+                </span>
+                {e.role === 'host' && (
+                  <span className="collab-host-badge" title="You are the host">
+                    <CrownIcon />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* ---- File Explorer ("Files & Documents") ---- */}
         <div className="sidebar-files-section">
           <FileExplorer
@@ -829,7 +1022,9 @@ function EditorPage() {
           onToggleSidebar={toggleSidebar}
           peers={peers}
           roomCode={roomCode}
+          role={roomRole}
           onJoinRoom={handleJoinRoom}
+          onLeaveRoom={handleLeaveRoom}
         />
 
         <main className="editor-page-main">
@@ -839,11 +1034,13 @@ function EditorPage() {
                 key={`${docId}-${roomCode}`}
                 documentId={docId}
                 roomCode={roomCode}
+                role={roomRole}
                 user={user}
                 initialHtml={initialHtml}
                 onChange={handleContentChange}
                 onRemoteChange={handleRemoteChange}
                 onPresenceChange={setPeers}
+                onAccessChange={setRoomAccess}
                 onNotify={showToast}
               />
             )}

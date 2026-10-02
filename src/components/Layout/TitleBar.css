@@ -163,6 +163,27 @@
   margin-left: 0;
 }
 
+/* The host stands out: gold ring + crown */
+.collaborator-host {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35);
+}
+
+.host-crown {
+  position: absolute;
+  top: -9px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #fff;
+  border: 2px solid var(--color-surface);
+}
+
 .collaborator-more {
   background: var(--color-surface-soft);
   color: var(--color-text-secondary);
@@ -254,6 +275,31 @@
   cursor: not-allowed;
 }
 
+/* Leave-the-room button */
+.leave-room-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 14px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-accent-red);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.leave-room-btn:hover {
+  background: var(--color-accent-red);
+  border-color: var(--color-accent-red);
+  color: #fff;
+}
+
 /* User card + menu */
 .title-bar-user-wrap {
   position: relative;
@@ -291,6 +337,10 @@
   flex-shrink: 0;
 }
 
+.title-bar-user-avatar.is-host {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.4);
+}
+
 .title-bar-user-info {
   display: flex;
   flex-direction: column;
@@ -310,6 +360,11 @@
 .title-bar-user-role {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.title-bar-user-role.is-host {
+  color: #d97706;
+  font-weight: 700;
 }
 
 .title-bar-chevron {
@@ -375,6 +430,14 @@
 
   .join-room-input {
     width: 130px;
+  }
+
+  .leave-room-btn span {
+    display: none;
+  }
+
+  .leave-room-btn {
+    padding: 0 12px;
   }
 }
 

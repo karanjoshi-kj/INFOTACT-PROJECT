@@ -121,6 +121,70 @@
   white-space: nowrap;
 }
 
+/* ---------- Formula bar (sits beside "Insert spreadsheet") ---------- */
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.formula-bar:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.formula-cell-ref {
+  min-width: 34px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.formula-bar .formula-select {
+  max-width: 112px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+}
+
+.formula-fx {
+  font-family: 'Times New Roman', serif;
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.formula-input {
+  width: 230px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12.5px;
+}
+
+.formula-input::placeholder {
+  font-family: inherit;
+  color: var(--color-text-muted);
+}
+
+.formula-bar .formula-apply {
+  padding: 5px 12px;
+  border-radius: 9px;
+}
+
 /* Zoom pill */
 .toolbar-zoom {
   display: flex;
@@ -335,6 +399,10 @@
 
   .ctx-hint {
     display: none;
+  }
+
+  .formula-input {
+    width: 140px;
   }
 
   .toolbar-zoom {
