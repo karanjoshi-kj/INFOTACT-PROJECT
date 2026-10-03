@@ -5,6 +5,7 @@ const Folder = require("../models/Folder");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
 const DOMPurify = require("isomorphic-dompurify");
+const exportASTToPDF = require("../astToPdf");
 
 const router = express.Router();
 
@@ -186,6 +187,27 @@ router.delete("/:id", checkId, async (req, res) => {
     res.json({ success: true, deletedId: String(doc._id) });
   } catch (err) {
     fail(res, err);
+  }
+});
+// Export document AST as PDF
+router.get("/:id/export/pdf", checkId, async (req, res) => {
+  try {
+    const doc = await Document.findById(req.params.id);
+    if (!doc) {
+      return res.status(404).json({ success: false, message: "Document not found" });
+    }
+
+    // Clean filename
+    const safeTitle = (doc.title || "document").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filename = `${safeTitle}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    exportASTToPDF(doc, res);
+  } catch (err) {
+    console.error("PDF export error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
