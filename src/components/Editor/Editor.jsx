@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import Toolbar from './Toolbar.jsx'
 import './Editor.css'
+import { getToken } from '../../utils/auth.js'
 
 const WS_URL = 'ws://localhost:1234'
 
@@ -739,7 +740,7 @@ function Editor({
   // Set up the shared Yjs document + WebSocket connection (again whenever the room changes)
   useEffect(() => {
     const ydoc = new Y.Doc()
-    const provider = new WebsocketProvider(WS_URL, roomName, ydoc)
+    const provider = new WebsocketProvider(WS_URL, roomName, ydoc, { params: { token: getToken() || '' } })
     const ytext = ydoc.getText('content')
     const approvals = ydoc.getMap('approvals') // userId -> { status: 'approved' | 'denied', ... }
     const colors = ydoc.getMap('colors') // userId -> colour (one per person, no repeats)
