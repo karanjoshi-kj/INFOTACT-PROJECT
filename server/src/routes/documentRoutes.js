@@ -23,9 +23,9 @@ function sanitizeHtml(html) {
     ALLOWED_TAGS: [
       "b", "strong", "i", "em", "u", "s", "h1", "h2", "h3",
       "p", "div", "span", "ul", "ol", "li", "br", "table",
-      "thead", "tbody", "tr", "th", "td", "pre", "code"
+      "thead", "tbody", "tr", "th", "td", "pre", "code", "img"
     ],
-    ALLOWED_ATTR: ["class", "contenteditable", "data-block-id"]
+    ALLOWED_ATTR: ["class", "contenteditable", "data-block-id", "src", "alt", "data-lang"]
   });
 }
 
