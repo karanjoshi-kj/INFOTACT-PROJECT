@@ -4,6 +4,7 @@ const Document = require("../models/Document");
 const Folder = require("../models/Folder");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
+const DOMPurify = require("isomorphic-dompurify");
 
 const router = express.Router();
 
@@ -15,16 +16,15 @@ router.use(requireAuth);
 // The editor only ever produces these tags. Anything else is removed, and ALL
 // attributes (onclick, style, href...) are dropped, so saved html can never carry a script.
 const ALLOWED_TAGS = new Set(["b", "strong", "i", "em", "u", "h1", "h2", "ul", "ol", "li", "div", "p", "br", "span"]);
-
 function sanitizeHtml(html) {
-  return String(html).replace(/<[^<>]*>|[<>]/g, (token) => {
-    const m = token.match(/^<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^<>]*>$/);
-    if (m && ALLOWED_TAGS.has(m[2].toLowerCase())) {
-      return `<${m[1]}${m[2].toLowerCase()}>`;
-    }
-    if (token === "<") return "&lt;";
-    if (token === ">") return "&gt;";
-    return ""; // a disallowed tag
+  if (!html) return "";
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      "b", "strong", "i", "em", "u", "s", "h1", "h2", "h3",
+      "p", "div", "span", "ul", "ol", "li", "br", "table",
+      "thead", "tbody", "tr", "th", "td", "pre", "code"
+    ],
+    ALLOWED_ATTR: ["class", "contenteditable", "data-block-id"]
   });
 }
 
