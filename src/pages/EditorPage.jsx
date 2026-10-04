@@ -252,6 +252,7 @@ function EditorPage() {
   const [loadState, setLoadState] = useState('loading') // 'loading' | 'ready' | 'error'
   const [loadError, setLoadError] = useState('')
   const [initialHtml, setInitialHtml] = useState('')
+  const [initialToolState, setInitialToolState] = useState(null) // persisted tool state from backend
   const [saveStatus, setSaveStatus] = useState('Loading...')
   const [saveProgress, setSaveProgress] = useState(0) // 0-100 for the progress bar
   const [wordCount, setWordCount] = useState(0)
@@ -281,7 +282,8 @@ function EditorPage() {
   const latestContentRef = useRef({ html: '', text: '' })
   const titleRef = useRef('Untitled Document')
   const docIdRef = useRef(null) // the document that is currently loaded
-  const dirtyRef = useRef({ html: false, title: false }) // what still needs saving
+  const dirtyRef = useRef({ html: false, title: false, toolState: false }) // what still needs saving
+  const toolStateRef = useRef(null) // latest tool state from the editor
   const debounceTimerRef = useRef(null)
   const retryTimerRef = useRef(null)
   const toastTimerRef = useRef(null)
@@ -598,7 +600,7 @@ function EditorPage() {
         docIdRef.current = docId
         titleRef.current = data.document.title
         latestContentRef.current = { html, text: htmlToPlainText(html) }
-        dirtyRef.current = { html: false, title: false }
+        dirtyRef.current = { html: false, title: false, toolState: false }
 
         // Which room? A shared link wins, then the room this document used last, then a fresh one.
         const fromLink = cleanRoom(pendingRoomRef.current)
@@ -634,6 +636,14 @@ function EditorPage() {
         setLoadedDocId(docId)
         updateCounts(latestContentRef.current.text)
         setInitialHtml(html)
+        // Restore persisted toolbar state from the backend
+        if (data.toolState && typeof data.toolState === 'object') {
+          toolStateRef.current = data.toolState
+          setInitialToolState(data.toolState)
+        } else {
+          toolStateRef.current = null
+          setInitialToolState(null)
+        }
         setSaveStatus('All changes saved')
         setSaveProgress(100)
         setLoadState('ready')
@@ -670,7 +680,7 @@ function EditorPage() {
   async function performSave() {
     const id = docIdRef.current
     const dirty = dirtyRef.current
-    if (!id || (!dirty.html && !dirty.title)) return
+    if (!id || (!dirty.html && !dirty.title && !dirty.toolState)) return
 
     // Only one request at a time. If one is running, it re-checks for new edits when it ends.
     if (isSavingRef.current) return
@@ -679,7 +689,8 @@ function EditorPage() {
     const payload = {}
     if (dirty.html) payload.html = latestContentRef.current.html
     if (dirty.title) payload.title = titleRef.current
-    dirtyRef.current = { html: false, title: false } // edits made from now on mark it dirty again
+    if (dirty.toolState && toolStateRef.current) payload.toolState = toolStateRef.current
+    dirtyRef.current = { html: false, title: false, toolState: false } // edits made from now on mark it dirty again
 
     setSaveStatus('Saving...')
     setSaveProgress(30)
@@ -693,6 +704,7 @@ function EditorPage() {
       // put the flags back so the retry sends this content again
       if (payload.html !== undefined) dirtyRef.current.html = true
       if (payload.title !== undefined) dirtyRef.current.title = true
+      if (payload.toolState !== undefined) dirtyRef.current.toolState = true
       setSaveProgress(0)
     }
     isSavingRef.current = false
@@ -705,7 +717,7 @@ function EditorPage() {
       return
     }
 
-    if (dirtyRef.current.html || dirtyRef.current.title) {
+    if (dirtyRef.current.html || dirtyRef.current.title || dirtyRef.current.toolState) {
       // the user kept typing while we were saving
       setSaveStatus('Unsaved changes...')
       setSaveProgress(10)
@@ -731,12 +743,13 @@ function EditorPage() {
     clearTimeout(retryTimerRef.current)
     const id = docIdRef.current
     const dirty = dirtyRef.current
-    if (!id || (!dirty.html && !dirty.title)) return
+    if (!id || (!dirty.html && !dirty.title && !dirty.toolState)) return
 
     const payload = {}
     if (dirty.html) payload.html = latestContentRef.current.html
     if (dirty.title) payload.title = titleRef.current
-    dirtyRef.current = { html: false, title: false }
+    if (dirty.toolState && toolStateRef.current) payload.toolState = toolStateRef.current
+    dirtyRef.current = { html: false, title: false, toolState: false }
     saveDocument(id, payload, { keepalive: true }).catch(() => { })
   }
 
@@ -780,6 +793,12 @@ function EditorPage() {
     scheduleSave()
   }
 
+  const handleToolStateChange = (partialToolState) => {
+    toolStateRef.current = { ...(toolStateRef.current || {}), ...partialToolState }
+    dirtyRef.current.toolState = true
+    scheduleSave()
+  }
+
   // ---------------------------------------------------------------
   // FILE EXPLORER callbacks
   // ---------------------------------------------------------------
@@ -808,7 +827,7 @@ function EditorPage() {
   const handleActiveDeleted = (deletedId, nextId) => {
     clearTimeout(debounceTimerRef.current)
     clearTimeout(retryTimerRef.current)
-    dirtyRef.current = { html: false, title: false } // never save into a deleted document
+    dirtyRef.current = { html: false, title: false, toolState: false } // never save into a deleted document
     docIdRef.current = null
     removeCollab(deletedId)
     try {
@@ -1033,12 +1052,15 @@ function EditorPage() {
               <Editor
                 key={`${docId}-${roomCode}`}
                 documentId={docId}
+                documentTitle={title}
                 roomCode={roomCode}
                 role={roomRole}
                 user={user}
                 initialHtml={initialHtml}
+                initialToolState={initialToolState}
                 onChange={handleContentChange}
                 onRemoteChange={handleRemoteChange}
+                onToolStateChange={handleToolStateChange}
                 onPresenceChange={setPeers}
                 onAccessChange={setRoomAccess}
                 onNotify={showToast}

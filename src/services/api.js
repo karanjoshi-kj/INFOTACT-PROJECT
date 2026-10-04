@@ -63,14 +63,52 @@ export function getDocument(id) {
   return request(`/documents/${id}`)
 }
 
-// Send only the fields you want to change: { html }, { title }, { folder } or any mix.
+// Send only the fields you want to change: { html }, { title }, { folder }, { toolState } or any mix.
 // folder: a folder id to move the document into, or null for the top level.
-export function saveDocument(id, { html, title, folder }, { keepalive = false } = {}) {
+export function saveDocument(id, { html, title, folder, toolState }, { keepalive = false } = {}) {
   const body = {}
   if (html !== undefined) body.html = html
   if (title !== undefined) body.title = title
   if (folder !== undefined) body.folder = folder
+  if (toolState !== undefined) body.toolState = toolState
   return request(`/documents/${id}`, { method: 'PUT', body, keepalive })
+}
+
+export async function exportDocumentPdf(id, { html, title, toolState } = {}) {
+  const authToken = getToken()
+  let response
+  try {
+    response = await fetch(`${API_BASE}/documents/${id}/export/pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ html, title, toolState }),
+    })
+  } catch {
+    throw new Error('Cannot reach the server for PDF export. Please check that the backend is running.')
+  }
+
+  if (!response.ok) {
+    let msg = `PDF Export failed (status ${response.status}).`
+    try {
+      const data = await response.json()
+      if (data && data.message) msg = data.message
+    } catch {
+      // not json
+    }
+    const err = new Error(msg)
+    err.status = response.status
+    throw err
+  }
+
+  const blob = await response.blob()
+  return {
+    blob,
+    exportedAt: response.headers.get('X-SyncDoc-Exported-At'),
+    exportCount: response.headers.get('X-SyncDoc-Export-Count'),
+  }
 }
 
 export function deleteDocument(id) {

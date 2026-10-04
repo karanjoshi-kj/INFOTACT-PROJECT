@@ -79,8 +79,13 @@
   padding-left: 1.6em;
 }
 
-.editor-content ul li::marker {
+.editor-content ul li::marker,
+.editor-content ol li::marker {
   color: var(--color-primary);
+}
+
+.editor-content ol.roman-list {
+  list-style-type: upper-roman;
 }
 
 .editor-content li {

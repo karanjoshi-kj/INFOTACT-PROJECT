@@ -30,6 +30,26 @@ const NumberedListIcon = () => (
   </Svg>
 )
 
+const RomanListIcon = () => (
+  <Svg>
+    <line x1="10" y1="6" x2="20" y2="6" />
+    <line x1="10" y1="12" x2="20" y2="12" />
+    <line x1="10" y1="18" x2="20" y2="18" />
+    <text x="2" y="8" fontSize="6" fill="currentColor" stroke="none">I</text>
+    <text x="1" y="14" fontSize="6" fill="currentColor" stroke="none">II</text>
+    <text x="0" y="20" fontSize="5" fill="currentColor" stroke="none">III</text>
+  </Svg>
+)
+
+const PdfExportIcon = () => (
+  <Svg>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="12" y1="18" x2="12" y2="12" />
+    <polyline points="9 15 12 18 15 15" />
+  </Svg>
+)
+
 const AlignLeftIcon = () => (
   <Svg>
     <line x1="17" y1="10" x2="3" y2="10" />
@@ -359,11 +379,18 @@ function Toolbar({
   codeLang = 'JavaScript',
   zoom = 100,
   onZoomChange,
+  onExportPdf,
+  exportingPdf = false,
+  listStyle = 'bullet',
+  onListStyleChange,
+  textAlign = 'left',
+  onTextAlignChange,
+  activeTab = 'photo',
+  onActiveTabChange,
 }) {
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
   const modKey = isMac ? '⌘' : 'Ctrl'
 
-  const [activeTab, setActiveTab] = useState('photo') // 'photo' | 'code' | 'sheet'
   const [blockType, setBlockType] = useState('Normal')
   const [fmt, setFmt] = useState({})
 
@@ -393,6 +420,32 @@ function Toolbar({
     return () => document.removeEventListener('selectionchange', update)
   }, [])
 
+  const handleTabChange = (tab) => {
+    if (onActiveTabChange) onActiveTabChange(tab)
+  }
+
+  const handleAlign = (align) => {
+    if (onTextAlignChange) onTextAlignChange(align)
+    const cmdMap = {
+      left: 'justifyLeft',
+      center: 'justifyCenter',
+      right: 'justifyRight',
+      justify: 'justifyFull',
+    }
+    onFormat(cmdMap[align] || 'justifyLeft')
+  }
+
+  const handleListSelect = (style) => {
+    if (onListStyleChange) onListStyleChange(style)
+    if (style === 'bullet') {
+      onFormat('insertUnorderedList')
+    } else if (style === 'number') {
+      onFormat('insertOrderedList')
+    } else if (style === 'roman') {
+      onFormat('insertRomanList')
+    }
+  }
+
   const blockTypes = [
     { label: 'Normal', arg: 'P' },
     { label: 'Heading 1', arg: 'H1' },
@@ -416,7 +469,7 @@ function Toolbar({
           <button
             type="button"
             className={`toolbar-tab ${activeTab === 'photo' ? 'active' : ''}`}
-            onClick={() => setActiveTab('photo')}
+            onClick={() => handleTabChange('photo')}
           >
             <ImageIcon />
             <span>Photograph</span>
@@ -424,7 +477,7 @@ function Toolbar({
           <button
             type="button"
             className={`toolbar-tab ${activeTab === 'code' ? 'active' : ''}`}
-            onClick={() => setActiveTab('code')}
+            onClick={() => handleTabChange('code')}
           >
             <CodeIcon />
             <span>Code</span>
@@ -432,7 +485,7 @@ function Toolbar({
           <button
             type="button"
             className={`toolbar-tab ${activeTab === 'sheet' ? 'active' : ''}`}
-            onClick={() => setActiveTab('sheet')}
+            onClick={() => handleTabChange('sheet')}
           >
             <TableIcon />
             <span>Spreadsheet</span>
@@ -487,7 +540,6 @@ function Toolbar({
                 <PlusIcon />
                 <span>Column</span>
               </button>
-              <span className="ctx-hint">Formulas: =SUM(A1:A3)</span>
             </>
           )}
         </div>
@@ -576,10 +628,10 @@ function Toolbar({
 
         {/* Alignment */}
         <div className="toolbar-group">
-          <Btn title="Align Left" onClick={() => onFormat('justifyLeft')}><AlignLeftIcon /></Btn>
-          <Btn title="Align Center" onClick={() => onFormat('justifyCenter')}><AlignCenterIcon /></Btn>
-          <Btn title="Align Right" onClick={() => onFormat('justifyRight')}><AlignRightIcon /></Btn>
-          <Btn title="Justify" onClick={() => onFormat('justifyFull')}><AlignJustifyIcon /></Btn>
+          <Btn title="Align Left" active={textAlign === 'left'} onClick={() => handleAlign('left')}><AlignLeftIcon /></Btn>
+          <Btn title="Align Center" active={textAlign === 'center'} onClick={() => handleAlign('center')}><AlignCenterIcon /></Btn>
+          <Btn title="Align Right" active={textAlign === 'right'} onClick={() => handleAlign('right')}><AlignRightIcon /></Btn>
+          <Btn title="Justify" active={textAlign === 'justify'} onClick={() => handleAlign('justify')}><AlignJustifyIcon /></Btn>
         </div>
 
         <div className="toolbar-divider" />
@@ -587,11 +639,11 @@ function Toolbar({
         {/* Lists (button + dropdown arrow) */}
         <div className="toolbar-group">
           <Btn
-            title={`Bullet List (${modKey}+Shift+8)`}
-            active={fmt.insertUnorderedList}
-            onClick={() => onFormat('insertUnorderedList')}
+            title={listStyle === 'roman' ? 'Roman list' : listStyle === 'number' ? 'Numbered list' : `Bullet List (${modKey}+Shift+8)`}
+            active={fmt.insertUnorderedList || fmt.insertOrderedList || listStyle === 'roman'}
+            onClick={() => handleListSelect(listStyle === 'roman' ? 'roman' : listStyle === 'number' ? 'number' : 'bullet')}
           >
-            <BulletListIcon />
+            {listStyle === 'roman' ? <RomanListIcon /> : listStyle === 'number' ? <NumberedListIcon /> : <BulletListIcon />}
           </Btn>
           <Menu
             renderTrigger={({ toggle }) => (
@@ -608,11 +660,14 @@ function Toolbar({
           >
             {(close) => (
               <>
-                <button type="button" className="tb-menu-item" onClick={() => { onFormat('insertUnorderedList'); close() }}>
+                <button type="button" className={`tb-menu-item ${listStyle === 'bullet' ? 'active' : ''}`} onClick={() => { handleListSelect('bullet'); close() }}>
                   <BulletListIcon /> <span>Bullet list</span>
                 </button>
-                <button type="button" className="tb-menu-item" onClick={() => { onFormat('insertOrderedList'); close() }}>
+                <button type="button" className={`tb-menu-item ${listStyle === 'number' ? 'active' : ''}`} onClick={() => { handleListSelect('number'); close() }}>
                   <NumberedListIcon /> <span>Numbered list</span>
+                </button>
+                <button type="button" className={`tb-menu-item ${listStyle === 'roman' ? 'active' : ''}`} onClick={() => { handleListSelect('roman'); close() }}>
+                  <RomanListIcon /> <span>Roman numerals (I, II, III...)</span>
                 </button>
               </>
             )}
@@ -682,6 +737,20 @@ function Toolbar({
             </>
           )}
         </Menu>
+
+        <div className="toolbar-spacer" />
+
+        {/* PDF Export button at the far right of the formatting toolbar */}
+        <button
+          type="button"
+          className={`toolbar-btn toolbar-export-btn ${exportingPdf ? 'exporting' : ''}`}
+          title={exportingPdf ? 'Generating PDF...' : 'Export document as PDF'}
+          disabled={exportingPdf}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onExportPdf}
+        >
+          <PdfExportIcon />
+        </button>
       </div>
     </div>
   )
