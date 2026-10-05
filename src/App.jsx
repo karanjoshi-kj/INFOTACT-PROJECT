@@ -3,6 +3,7 @@ import WelcomePage from './pages/WelcomePage.jsx'
 import LoginPage from './components/Auth/LoginPage.jsx'
 import SignupPage from './components/Auth/SignupPage.jsx'
 import ForgotPasswordPage from './components/Auth/ForgotPasswordPage.jsx'
+import OAuthCallback from './components/Auth/OAuthCallback.jsx'
 import { ProtectedRoute, PublicOnlyRoute } from './components/Auth/RouteGuards.jsx'
 import EditorPage from './pages/EditorPage.jsx'
 import './App.css'
@@ -37,6 +38,9 @@ function App() {
             </PublicOnlyRoute>
           }
         />
+
+        {/* Landing page after Google / GitHub login */}
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
 
         <Route
           path="/editor"

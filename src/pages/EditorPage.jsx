@@ -5,6 +5,7 @@ import Editor from '../components/Editor/Editor.jsx'
 import FileExplorer from '../components/Sidebar/FileExplorer.jsx'
 import { getUser, clearSession } from '../utils/auth.js'
 import { createDocument, getDocument, saveDocument, listDocuments } from '../services/api.js'
+import useSharedTitle from '../hooks/useSharedTitle.js'
 import './EditorPage.css'
 
 const SAVE_DELAY = 1000 // ms of no typing before we save (the "debounce")
@@ -785,11 +786,32 @@ function EditorPage() {
     updateCounts(text)
   }
 
+  // Another collaborator renamed the shared document: show it and keep it in our own saved copy
+  const handleRemoteTitle = (newTitle) => {
+    if (!docIdRef.current || newTitle === titleRef.current) return
+    titleRef.current = newTitle
+    dirtyRef.current.title = true
+    setTitle(newTitle)
+    scheduleSave()
+  }
+
+  // Live title sync through the same room the editor uses
+  const { publishTitle } = useSharedTitle({
+    enabled: loadState === 'ready' && !!loadedDocId,
+    docId: loadedDocId,
+    roomCode,
+    role: roomRole,
+    access: roomAccess,
+    getTitle: () => titleRef.current,
+    onRemoteTitle: handleRemoteTitle,
+  })
+
   const handleTitleChange = (newTitle) => {
     setTitle(newTitle)
     if (newTitle === titleRef.current) return
     titleRef.current = newTitle
     dirtyRef.current.title = true
+    publishTitle(newTitle)
     scheduleSave()
   }
 
@@ -821,6 +843,7 @@ function EditorPage() {
     titleRef.current = newTitle
     dirtyRef.current.title = false
     setTitle(newTitle)
+    publishTitle(newTitle)
   }
 
   // The open document was deleted (directly, or because its folder was deleted)

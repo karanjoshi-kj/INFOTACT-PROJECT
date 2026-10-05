@@ -808,23 +808,34 @@ function Editor({
     if (!isHost) provider.awareness.setLocalStateField('joinRequest', myRequest)
 
     const emitPresence = () => {
-      const list = []
-      const waiting = []
+      // One entry per ACCOUNT (userId), never per socket: awareness has one state per
+      // connection, so a reconnect / second tab / lingering old state of the same
+      // person would otherwise show up as a second collaborator.
+      const byUser = new Map() // userId -> person shown in the list
+      const waitingByUser = new Map() // userId -> join request shown to the host
       provider.awareness.getStates().forEach((state, clientId) => {
         const u = state.user
-        if (!u) return
+        if (!u || u.id === undefined || u.id === null) return
         const isSelf = clientId === provider.awareness.clientID
+        if (!isSelf && u.id === myId) return // another connection of MY account: already listed as me
         const rec = approvals.get(u.id)
         const approved = rec && rec.status === 'approved'
         if (u.role === 'host' || approved || isSelf) {
-          list.push({ id: clientId, name: u.name, color: u.color, role: u.role, isSelf })
+          const prev = byUser.get(u.id)
+          const keepPrev = prev && (prev.isSelf || (!isSelf && (prev.role === 'host' || u.role !== 'host')))
+          if (!keepPrev) byUser.set(u.id, { id: u.id, name: u.name, color: u.color, role: u.role, isSelf })
         } else if (isHost) {
           const declinedThisTime = rec && rec.status === 'denied' && rec.req === state.joinRequest
           if (!declinedThisTime) {
-            waiting.push({ clientId, id: u.id, name: u.name, color: u.color, req: state.joinRequest })
+            const prev = waitingByUser.get(u.id)
+            if (!prev || (state.joinRequest || 0) > (prev.req || 0)) {
+              waitingByUser.set(u.id, { clientId, id: u.id, name: u.name, color: u.color, req: state.joinRequest })
+            }
           }
         }
       })
+      const list = Array.from(byUser.values())
+      const waiting = Array.from(waitingByUser.values())
       list.sort((a, b) => (b.role === 'host') - (a.role === 'host')) // host first
       setPeople(list)
       if (onPresenceRef.current) onPresenceRef.current(list)

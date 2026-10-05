@@ -47,6 +47,11 @@ export function loginUser({ email, password }) {
   return request('/auth/login', { method: 'POST', body: { email, password } })
 }
 
+// Used after a Google / GitHub login: -> { user }
+export function getCurrentUser(token) {
+  return request('/auth/me', { token })
+}
+
 // ---- documents ----
 
 // Every document owned by the logged-in user (light fields only, no html)
