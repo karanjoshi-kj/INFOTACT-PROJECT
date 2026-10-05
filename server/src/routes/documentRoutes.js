@@ -1,11 +1,11 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const cheerio = require("cheerio");
 const Document = require("../models/Document");
 const Folder = require("../models/Folder");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
-const DOMPurify = require("isomorphic-dompurify");
-const exportASTToPDF = require("../astToPdf");
+const { generateDocumentPdf } = require("../utils/pdfExport");
 
 const router = express.Router();
 
@@ -14,19 +14,100 @@ router.use(requireAuth);
 
 // ---------- helpers ----------
 
-// The editor only ever produces these tags. Anything else is removed, and ALL
-// attributes (onclick, style, href...) are dropped, so saved html can never carry a script.
-const ALLOWED_TAGS = new Set(["b", "strong", "i", "em", "u", "h1", "h2", "ul", "ol", "li", "div", "p", "br", "span"]);
-function sanitizeHtml(html) {
-  if (!html) return "";
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      "b", "strong", "i", "em", "u", "s", "h1", "h2", "h3",
-      "p", "div", "span", "ul", "ol", "li", "br", "table",
-      "thead", "tbody", "tr", "th", "td", "pre", "code", "img"
-    ],
-    ALLOWED_ATTR: ["class", "contenteditable", "data-block-id", "src", "alt", "data-lang"]
+// Allowed tags produced by the editor
+const ALLOWED_TAGS = new Set([
+  "b", "strong", "i", "em", "u", "s", "strike", "del",
+  "h1", "h2", "h3", "ul", "ol", "li", "div", "p", "br", "span", "hr",
+  "table", "thead", "tbody", "tr", "th", "td",
+  "pre", "code", "img", "a"
+]);
+
+function sanitizeHtml(rawHtml) {
+  if (!rawHtml || typeof rawHtml !== "string") return "";
+  const $ = cheerio.load(rawHtml, null, false);
+
+  $("*").each((_, el) => {
+    const tag = el.name ? el.name.toLowerCase() : "";
+    if (!ALLOWED_TAGS.has(tag)) {
+      $(el).remove();
+      return;
+    }
+
+    const attrs = el.attribs || {};
+    const safeAttrs = {};
+
+    // List numbering type (e.g. Roman numerals 'I', 'i', or '1', 'a', 'A')
+    if (attrs.type && tag === "ol") {
+      const t = attrs.type.trim();
+      if (/^[1aAiI]$/.test(t)) safeAttrs.type = t;
+    }
+
+    // Classes used by the editor
+    if (attrs.class) {
+      const classes = attrs.class.split(/\s+/).filter((c) =>
+        ["roman-list", "code-block", "sheet", "doc-table"].includes(c)
+      );
+      if (classes.length > 0) safeAttrs.class = classes.join(" ");
+    }
+
+    // Safe inline styles: text alignment, list styles, and authorship colors
+    if (attrs.style) {
+      const styleProps = [];
+      const declarations = attrs.style.split(";");
+      for (const decl of declarations) {
+        const [prop, val] = decl.split(":").map((s) => s && s.trim());
+        if (!prop || !val) continue;
+        const p = prop.toLowerCase();
+        if (p === "text-align" && ["left", "center", "right", "justify"].includes(val.toLowerCase())) {
+          styleProps.push(`text-align: ${val.toLowerCase()}`);
+        } else if (p === "list-style-type" && ["upper-roman", "lower-roman", "decimal", "disc", "circle", "square"].includes(val.toLowerCase())) {
+          styleProps.push(`list-style-type: ${val.toLowerCase()}`);
+        } else if (p === "--author-color" && /^#[0-9a-fA-F]{3,8}$/.test(val)) {
+          styleProps.push(`--author-color: ${val}`);
+        }
+      }
+      if (styleProps.length > 0) safeAttrs.style = styleProps.join("; ");
+    }
+
+    if (attrs.align && ["left", "center", "right", "justify"].includes(attrs.align.toLowerCase())) {
+      safeAttrs.align = attrs.align.toLowerCase();
+    }
+
+    if (tag === "img" && attrs.src) {
+      if (attrs.src.startsWith("data:image/") || /^https?:\/\//i.test(attrs.src)) {
+        safeAttrs.src = attrs.src;
+        if (attrs.alt) safeAttrs.alt = attrs.alt.slice(0, 200);
+      }
+    }
+
+    if (tag === "a" && attrs.href) {
+      if (/^https?:\/\//i.test(attrs.href) || /^mailto:/i.test(attrs.href)) {
+        safeAttrs.href = attrs.href;
+      }
+    }
+
+    if (attrs["data-lang"] && tag === "pre") {
+      safeAttrs["data-lang"] = attrs["data-lang"].slice(0, 30);
+    }
+
+    if (attrs["data-formula"] && tag === "td") {
+      safeAttrs["data-formula"] = attrs["data-formula"].slice(0, 500);
+    }
+
+    if (attrs["data-author"]) {
+      safeAttrs["data-author"] = String(attrs["data-author"]).slice(0, 100);
+    }
+    if (attrs["data-author-name"]) {
+      safeAttrs["data-author-name"] = String(attrs["data-author-name"]).slice(0, 100);
+    }
+    if (attrs.title) {
+      safeAttrs.title = String(attrs.title).slice(0, 100);
+    }
+
+    el.attribs = safeAttrs;
   });
+
+  return $.html();
 }
 
 // Editor HTML -> the **bold** / *italic* / __underline__ text that textToAST expects
@@ -127,17 +208,23 @@ router.get("/:id", checkId, async (req, res) => {
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
     const html = doc.html !== null && doc.html !== undefined ? doc.html : astToHtml(doc.children);
-    res.json({ success: true, document: doc, html });
+    res.json({
+      success: true,
+      document: doc,
+      html,
+      toolState: doc.toolState || null,
+      lastExportedAt: doc.lastExportedAt || null,
+    });
   } catch (err) {
     fail(res, err);
   }
 });
 
-// Save: html, title and/or folder. A field that is NOT sent is left untouched
+// Save: html, title, folder and/or toolState. A field that is NOT sent is left untouched
 // (so renaming or moving a document can never wipe its content).
 router.put("/:id", checkId, async (req, res) => {
   try {
-    const { html, title, folder } = req.body;
+    const { html, title, folder, toolState } = req.body;
     const doc = await Document.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
@@ -156,6 +243,11 @@ router.put("/:id", checkId, async (req, res) => {
 
     if (typeof title === "string" && title.trim()) doc.title = title.trim();
 
+    if (toolState && typeof toolState === "object") {
+      doc.toolState = { ...(doc.toolState || {}), ...toolState };
+      doc.markModified("toolState");
+    }
+
     // Moving a document between folders: only its owner may do that
     if (folder !== undefined) {
       if (String(doc.owner) !== String(req.userId)) {
@@ -168,12 +260,75 @@ router.put("/:id", checkId, async (req, res) => {
     res.json({
       success: true,
       savedAt: doc.updatedAt,
-      document: { _id: doc._id, title: doc.title, folder: doc.folder, updatedAt: doc.updatedAt },
+      document: {
+        _id: doc._id,
+        title: doc.title,
+        folder: doc.folder,
+        updatedAt: doc.updatedAt,
+        toolState: doc.toolState,
+        lastExportedAt: doc.lastExportedAt,
+      },
     });
   } catch (err) {
     fail(res, err);
   }
 });
+
+// Real PDF Export (GET or POST):
+// Persists the export timestamp & counter in MongoDB and streams the generated PDF back.
+// POST optionally accepts the latest { html, title } to ensure the newest document state is saved before export.
+async function handleExportPdf(req, res) {
+  try {
+    const doc = await Document.findById(req.params.id);
+    if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    // If client supplied unsaved title or html in POST, save it first
+    if (req.method === "POST" && req.body) {
+      const { html, title, toolState } = req.body;
+      if (typeof html === "string") {
+        const clean = sanitizeHtml(html);
+        doc.html = clean;
+        const tree = textToAST(htmlToMarkedText(clean));
+        doc.children = tree.children.map((block, index) => ({
+          ...block,
+          position: index,
+          parentId: null,
+        }));
+      }
+      if (typeof title === "string" && title.trim()) {
+        doc.title = title.trim();
+      }
+      if (toolState && typeof toolState === "object") {
+        doc.toolState = { ...(doc.toolState || {}), ...toolState };
+        doc.markModified("toolState");
+      }
+    }
+
+    // Update document export tracking state in MongoDB
+    doc.lastExportedAt = new Date();
+    doc.exportCount = (doc.exportCount || 0) + 1;
+    await doc.save();
+
+    const contentHtml = doc.html !== null && doc.html !== undefined ? doc.html : astToHtml(doc.children);
+    const pdfBuffer = await generateDocumentPdf({
+      title: doc.title,
+      html: contentHtml,
+    });
+
+    const safeFilename = encodeURIComponent((doc.title || "document").replace(/[/\\?%*:|"<>]/g, "_"));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.pdf"; filename*=UTF-8''${safeFilename}.pdf`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-SyncDoc-Exported-At", doc.lastExportedAt.toISOString());
+    res.setHeader("X-SyncDoc-Export-Count", String(doc.exportCount));
+    res.send(pdfBuffer);
+  } catch (err) {
+    fail(res, err);
+  }
+}
+
+router.get("/:id/export/pdf", checkId, handleExportPdf);
+router.post("/:id/export/pdf", checkId, handleExportPdf);
 
 // Delete a document (owner only)
 router.delete("/:id", checkId, async (req, res) => {

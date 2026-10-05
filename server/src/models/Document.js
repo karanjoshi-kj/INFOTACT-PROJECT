@@ -43,6 +43,21 @@ const documentSchema = new mongoose.Schema(
 
     html: { type: String, default: null },
 
+    lastExportedAt: { type: Date, default: null },
+    exportCount: { type: Number, default: 0 },
+
+    toolState: {
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({
+        activeTab: "photo",
+        codeLang: "JavaScript",
+        zoom: 100,
+        listStyle: "bullet",
+        blockType: "Normal",
+        textAlign: "left",
+      }),
+    },
+
     children: {
       type: [blockSchema],
       default: [{ id: "p1", type: "paragraph", children: [{ type: "text", content: "", marks: [] }] }],

@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const requireAuth = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -32,6 +33,14 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email or password" });
     }
 
+    // Accounts created with Google / GitHub have no password.
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        message: "This account uses Google or GitHub sign-in. Please use that option instead.",
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: "Invalid email or password" });
@@ -44,5 +53,22 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// Returns the logged-in user (used after a Google / GitHub login to build the session).
+router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select("name email");
+    if (!user) {
+      return res.status(401).json({ success: false, message: "Account not found. Please log in again" });
+    }
+
+    res.json({ success: true, user: { id: user._id, name: user.name, email: user.email } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Google + GitHub OAuth: /google, /google/callback, /github, /github/callback
+router.use(require("./oauthRoutes"));
 
 module.exports = router;
