@@ -9,7 +9,7 @@ const roomRoutes = require("./routes/roomRoutes");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "5mb" })); // documents can be large
+app.use(express.json({ limit: "10mb" })); // documents can be large
 
 app.get("/api/health", (req, res) => {
   res.json({ success: true, message: "SyncDoc backend is running" });

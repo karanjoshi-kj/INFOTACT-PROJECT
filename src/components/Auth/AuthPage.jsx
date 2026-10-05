@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { loginUser, signupUser } from '../../services/api.js'
 import { saveSession } from '../../utils/auth.js'
+import SocialLoginButtons from './SocialLoginButtons.jsx'
 import './AuthPage.css'
+import './SocialLoginButtons.css'
 
 const EyeIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -20,6 +22,15 @@ const EyeOffIcon = () => (
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD_LENGTH = 8
+
+// Messages for the ?error=<code> the backend adds when a Google / GitHub login fails.
+const OAUTH_ERRORS = {
+  oauth_denied: 'Sign-in was cancelled. Please try again.',
+  oauth_state: 'Your sign-in session expired or was invalid. Please try again.',
+  oauth_no_email: 'We could not get a verified email address from that account.',
+  oauth_not_configured: 'This sign-in method is not available right now.',
+  oauth_failed: 'Social sign-in failed. Please try again.',
+}
 
 // initialMode: 'signin' | 'signup' — decides which side is active on first load.
 function AuthPage({ initialMode = 'signin' }) {
@@ -45,6 +56,16 @@ function AuthPage({ initialMode = 'signin' }) {
   const [suLoading, setSuLoading] = useState(false)
   const [suShowPassword, setSuShowPassword] = useState(false)
   const [suShowConfirm, setSuShowConfirm] = useState(false)
+
+  // Show the error of a failed Google / GitHub login, then clean it out of the URL.
+  useEffect(() => {
+    const code = new URLSearchParams(location.search).get('error')
+    if (!code) return
+
+    setMode('signin')
+    setSiError(OAUTH_ERRORS[code] || OAUTH_ERRORS.oauth_failed)
+    navigate(location.pathname, { replace: true, state: location.state })
+  }, [location.search, location.pathname, location.state, navigate])
 
   const goToSignIn = (prefillEmail) => {
     setMode('signin')
@@ -307,6 +328,8 @@ function AuthPage({ initialMode = 'signin' }) {
               <button type="submit" className="auth-button" disabled={siLoading}>
                 {siLoading ? <span className="spinner"></span> : 'Sign In'}
               </button>
+
+              <SocialLoginButtons remember={siRemember} disabled={siLoading} />
 
               <p className="auth-mobile-switch">
                 Don't have an account?{' '}

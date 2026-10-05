@@ -1,0 +1,76 @@
+/* Google / GitHub buttons below the Sign In button (uses the tokens from AuthPage.css) */
+
+.social-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 12px;
+  color: var(--auth-text-muted);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+
+.social-divider::before,
+.social-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--auth-border);
+}
+
+.social-row {
+  display: flex;
+  gap: 12px;
+}
+
+.social-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--auth-input-bg);
+  color: var(--auth-text-primary);
+  border: 1px solid var(--auth-input-border);
+  border-radius: var(--auth-radius-sm);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--clay-raised-sm);
+  transition: border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.social-btn svg {
+  flex-shrink: 0;
+}
+
+.social-btn:hover:not(:disabled) {
+  border-color: var(--auth-border-strong);
+  transform: translateY(-1px);
+}
+
+.social-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--clay-pressed);
+}
+
+.social-btn:focus-visible {
+  outline: 2px solid var(--auth-accent-soft);
+  outline-offset: 2px;
+}
+
+.social-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* The desktop card has a fixed minimum height; give the extra row room. */
+@media (min-width: 761px) {
+  .auth-frame {
+    min-height: 610px;
+  }
+}

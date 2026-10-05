@@ -13,9 +13,22 @@ const userSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    // Not required for accounts created through Google / GitHub.
     password: {
       type: String,
-      required: true,
+      required: function () {
+        return !this.googleId && !this.githubId;
+      },
+    },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    githubId: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
   },
   {

@@ -1,7 +1,8 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import Toolbar from './Toolbar.jsx'
+import { exportDocumentPdf } from '../../services/api.js'
 import './Editor.css'
 
 const WS_URL = 'ws://localhost:1234'
@@ -653,6 +654,9 @@ function Editor({
   roomCode = '',
   role = 'host',
   documentId = 'shared-doc',
+  documentTitle = 'Untitled Document',
+  initialToolState = null,
+  onToolStateChange,
 }) {
   const roomName = roomCode ? `syncdoc-room-${roomCode}` : documentId
 
@@ -675,7 +679,7 @@ function Editor({
   const savedRangeRef = useRef(null) // where the caret was, for toolbar buttons / file dialogs
   const currentCellRef = useRef(null) // spreadsheet cell the caret is in
   const activeCellRef = useRef(null) // last spreadsheet cell used (kept for the formula bar)
-  const codeLangRef = useRef('JavaScript')
+  const codeLangRef = useRef(initialToolState?.codeLang || 'JavaScript')
 
   const accessRef = useRef(role === 'host' ? 'granted' : 'pending') // 'granted' | 'pending' | 'denied'
   const selfRef = useRef({ id: 'guest', name: 'Guest', color: HOST_COLOR, role: 'host' })
@@ -683,12 +687,21 @@ function Editor({
   const decideRef = useRef(null) // host: (request, allow) => approve / deny a join request
   const notifiedRef = useRef(new Set()) // join requests the host was already told about
 
-  const [zoom, setZoom] = useState(100)
-  const [codeLang, setCodeLang] = useState('JavaScript')
+  // Tool state - lifted from toolbar to here for persistence & sharing
+  const init = initialToolState || {}
+  const [zoom, setZoom] = useState(init.zoom || 100)
+  const [codeLang, setCodeLang] = useState(init.codeLang || 'JavaScript')
+  const [activeTab, setActiveTab] = useState(init.activeTab || 'photo')
+  const [listStyle, setListStyle] = useState(init.listStyle || 'bullet')
+  const [textAlign, setTextAlign] = useState(init.textAlign || 'left')
   const [access, setAccess] = useState(role === 'host' ? 'granted' : 'pending')
   const [pending, setPending] = useState([]) // host: people waiting to be let in
   const [people, setPeople] = useState([]) // everyone allowed in the room (for the colour key)
   const [sheetCell, setSheetCell] = useState(null) // { ref, content } shown in the formula bar
+  const [exportingPdf, setExportingPdf] = useState(false)
+
+  // Yjs shared tool-state map – syncs active tab / list style / align across collaborators
+  const ytoolRef = useRef(null)
 
   const notify = (message, type = 'info') => {
     if (onNotifyRef.current) onNotifyRef.current(message, type)
@@ -743,9 +756,11 @@ function Editor({
     const ytext = ydoc.getText('content')
     const approvals = ydoc.getMap('approvals') // userId -> { status: 'approved' | 'denied', ... }
     const colors = ydoc.getMap('colors') // userId -> colour (one per person, no repeats)
+    const ytool = ydoc.getMap('toolState') // shared toolbar state across collaborators
 
     ydocRef.current = ydoc
     ytextRef.current = ytext
+    ytoolRef.current = ytool
     providerRef.current = provider
 
     const isHost = role === 'host'
@@ -793,23 +808,34 @@ function Editor({
     if (!isHost) provider.awareness.setLocalStateField('joinRequest', myRequest)
 
     const emitPresence = () => {
-      const list = []
-      const waiting = []
+      // One entry per ACCOUNT (userId), never per socket: awareness has one state per
+      // connection, so a reconnect / second tab / lingering old state of the same
+      // person would otherwise show up as a second collaborator.
+      const byUser = new Map() // userId -> person shown in the list
+      const waitingByUser = new Map() // userId -> join request shown to the host
       provider.awareness.getStates().forEach((state, clientId) => {
         const u = state.user
-        if (!u) return
+        if (!u || u.id === undefined || u.id === null) return
         const isSelf = clientId === provider.awareness.clientID
+        if (!isSelf && u.id === myId) return // another connection of MY account: already listed as me
         const rec = approvals.get(u.id)
         const approved = rec && rec.status === 'approved'
         if (u.role === 'host' || approved || isSelf) {
-          list.push({ id: clientId, name: u.name, color: u.color, role: u.role, isSelf })
+          const prev = byUser.get(u.id)
+          const keepPrev = prev && (prev.isSelf || (!isSelf && (prev.role === 'host' || u.role !== 'host')))
+          if (!keepPrev) byUser.set(u.id, { id: u.id, name: u.name, color: u.color, role: u.role, isSelf })
         } else if (isHost) {
           const declinedThisTime = rec && rec.status === 'denied' && rec.req === state.joinRequest
           if (!declinedThisTime) {
-            waiting.push({ clientId, id: u.id, name: u.name, color: u.color, req: state.joinRequest })
+            const prev = waitingByUser.get(u.id)
+            if (!prev || (state.joinRequest || 0) > (prev.req || 0)) {
+              waitingByUser.set(u.id, { clientId, id: u.id, name: u.name, color: u.color, req: state.joinRequest })
+            }
           }
         }
       })
+      const list = Array.from(byUser.values())
+      const waiting = Array.from(waitingByUser.values())
       list.sort((a, b) => (b.role === 'host') - (a.role === 'host')) // host first
       setPeople(list)
       if (onPresenceRef.current) onPresenceRef.current(list)
@@ -893,6 +919,24 @@ function Editor({
     evalAccess()
     emitPresence()
 
+    // Sync shared tool state (activeTab, listStyle, textAlign) across collaborators
+    const onToolState = () => {
+      const remoteTab = ytool.get('activeTab')
+      const remoteList = ytool.get('listStyle')
+      const remoteAlign = ytool.get('textAlign')
+      const remoteZoom = ytool.get('zoom')
+      const remoteCodeLang = ytool.get('codeLang')
+      if (remoteTab && ['photo', 'code', 'sheet'].includes(remoteTab)) setActiveTab(remoteTab)
+      if (remoteList && ['bullet', 'number', 'roman'].includes(remoteList)) setListStyle(remoteList)
+      if (remoteAlign && ['left', 'center', 'right', 'justify'].includes(remoteAlign)) setTextAlign(remoteAlign)
+      if (typeof remoteZoom === 'number' && remoteZoom >= 50 && remoteZoom <= 200) setZoom(remoteZoom)
+      if (typeof remoteCodeLang === 'string' && remoteCodeLang) {
+        codeLangRef.current = remoteCodeLang
+        setCodeLang(remoteCodeLang)
+      }
+    }
+    ytool.observe(onToolState)
+
     // Whenever the shared text changes (from ANY user, including this one),
     // reflect it in the DOM - but skip re-rendering if this change came
     // from our own typing (we already updated the DOM directly).
@@ -935,6 +979,20 @@ function Editor({
           Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(seed))
           seed.destroy()
         }
+        // Seed shared toolbar state from MongoDB on first sync, then apply any remote values.
+        if (isHost) {
+          const seedToolState = {
+            activeTab,
+            listStyle,
+            textAlign,
+            codeLang,
+            zoom,
+          }
+          Object.entries(seedToolState).forEach(([key, value]) => {
+            if (ytool.get(key) === undefined) ytool.set(key, value)
+          })
+        }
+        onToolState()
         resolveColor()
         evalAccess()
         emitPresence()
@@ -945,6 +1003,7 @@ function Editor({
       provider.awareness.off('change', emitPresence)
       approvals.unobserve(onApprovals)
       colors.unobserve(onColors)
+      ytool.unobserve(onToolState)
       ytext.unobserve(updateDOM)
       decideRef.current = null
       provider.destroy()
@@ -1048,12 +1107,75 @@ function Editor({
   }
 
   const handleFormat = (command, arg = null) => {
+    // Handle our custom Roman list command
+    if (command === 'insertRomanList') {
+      handleInsertRomanList()
+      return
+    }
     // formatBlock wants "<h1>" (Firefox rejects a bare "H1")
     if (command === 'formatBlock' && arg && !arg.startsWith('<')) arg = `<${arg}>`
     restoreSelection()
     document.execCommand(command, false, arg)
     editorRef.current.focus()
     // execCommand fires an "input" event by itself, so handleInput runs next.
+  }
+
+  // ---------------------------------------------------------------
+  // ROMAN NUMBERING LIST
+  // ---------------------------------------------------------------
+  const handleInsertRomanList = () => {
+    restoreSelection()
+    const el = editorRef.current
+    if (!el) return
+
+    const sel = window.getSelection()
+    const node = sel && sel.anchorNode
+    const caretEl = node ? (node.nodeType === 1 ? node : node.parentElement) : null
+
+    // Find closest list ancestor inside the editor
+    const existingOl = caretEl && caretEl.closest ? caretEl.closest('ol') : null
+    const existingUl = caretEl && caretEl.closest ? caretEl.closest('ul') : null
+
+    if (existingOl && el.contains(existingOl)) {
+      const isRoman = existingOl.getAttribute('type') === 'I' || existingOl.classList.contains('roman-list')
+      if (isRoman) {
+        // toggle off: convert to plain ordered list
+        existingOl.removeAttribute('type')
+        existingOl.classList.remove('roman-list')
+        existingOl.style.removeProperty('list-style-type')
+      } else {
+        // convert numbered list -> Roman
+        existingOl.setAttribute('type', 'I')
+        existingOl.classList.add('roman-list')
+        existingOl.style.listStyleType = 'upper-roman'
+      }
+    } else if (existingUl && el.contains(existingUl)) {
+      // Convert bullet list to Roman ordered list
+      const ol = document.createElement('ol')
+      ol.setAttribute('type', 'I')
+      ol.classList.add('roman-list')
+      ol.style.listStyleType = 'upper-roman'
+      while (existingUl.firstChild) ol.appendChild(existingUl.firstChild)
+      existingUl.parentNode.replaceChild(ol, existingUl)
+      // Place caret inside the new list
+      if (ol.firstChild) placeCaretAtEnd(ol.firstChild)
+    } else {
+      // No list: create a Roman numbered list via insertOrderedList, then modify it
+      document.execCommand('insertOrderedList', false, null)
+      // Now find the new <ol> and convert it to Roman
+      const newSel = window.getSelection()
+      const newNode = newSel && newSel.anchorNode
+      const newEl = newNode ? (newNode.nodeType === 1 ? newNode : newNode.parentElement) : null
+      const newOl = newEl && newEl.closest ? newEl.closest('ol') : null
+      if (newOl && el.contains(newOl)) {
+        newOl.setAttribute('type', 'I')
+        newOl.classList.add('roman-list')
+        newOl.style.listStyleType = 'upper-roman'
+      }
+    }
+
+    el.focus()
+    handleInput()
   }
 
   const insertHtml = (html) => {
@@ -1100,12 +1222,86 @@ function Editor({
   const handleCodeLanguage = (lang) => {
     codeLangRef.current = lang
     setCodeLang(lang)
+    pushToolState({ codeLang: lang })
     // If the caret is inside a code block, switch that block's language too
     const el = getCaretElement()
     const pre = el && el.closest ? el.closest('pre') : null
     if (pre && editorRef.current.contains(pre)) {
       pre.setAttribute('data-lang', lang)
       handleInput()
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // TOOL STATE PERSISTENCE (Yjs + MongoDB via parent)
+  // ---------------------------------------------------------------
+  const pushToolState = useCallback((partial) => {
+    const ytool = ytoolRef.current
+    if (ytool) {
+      const ydoc = ydocRef.current
+      if (ydoc) {
+        ydoc.transact(() => {
+          Object.entries(partial).forEach(([key, value]) => ytool.set(key, value))
+        })
+      }
+    }
+    if (onToolStateChange) onToolStateChange(partial)
+  }, [onToolStateChange])
+
+  const handleActiveTabChange = (tab) => {
+    setActiveTab(tab)
+    pushToolState({ activeTab: tab })
+  }
+
+  const handleListStyleChange = (style) => {
+    setListStyle(style)
+    pushToolState({ listStyle: style })
+  }
+
+  const handleTextAlignChange = (align) => {
+    setTextAlign(align)
+    pushToolState({ textAlign: align })
+  }
+
+  const handleZoomChange = (nextZoom) => {
+    setZoom(nextZoom)
+    pushToolState({ zoom: nextZoom })
+  }
+
+  // ---------------------------------------------------------------
+  // PDF EXPORT
+  // ---------------------------------------------------------------
+  const handleExportPdf = async () => {
+    if (exportingPdf) return
+    if (accessRef.current !== 'granted') {
+      notify('You need edit access to export this document', 'error')
+      return
+    }
+    setExportingPdf(true)
+    try {
+      const el = editorRef.current
+      const currentHtml = el ? el.innerHTML : lastHtmlRef.current
+      const result = await exportDocumentPdf(documentId, {
+        html: currentHtml,
+        title: documentTitle || 'Untitled Document',
+        toolState: { activeTab, listStyle, textAlign, codeLang, zoom },
+      })
+      // Trigger download in the browser
+      const url = URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(documentTitle || 'document').replace(/[\\/:*?"<>|]/g, '_')}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      }, 1000)
+      notify('PDF exported successfully!', 'success')
+    } catch (err) {
+      notify(`PDF export failed: ${err.message}`, 'error')
+    } finally {
+      setExportingPdf(false)
     }
   }
 
@@ -1340,7 +1536,15 @@ function Editor({
         onFormulaApply={handleFormulaApply}
         codeLang={codeLang}
         zoom={zoom}
-        onZoomChange={setZoom}
+        onZoomChange={handleZoomChange}
+        onExportPdf={handleExportPdf}
+        exportingPdf={exportingPdf}
+        listStyle={listStyle}
+        onListStyleChange={handleListStyleChange}
+        textAlign={textAlign}
+        onTextAlignChange={handleTextAlignChange}
+        activeTab={activeTab}
+        onActiveTabChange={handleActiveTabChange}
       />
 
       {/* Collaborator waiting for the host */}

@@ -285,6 +285,43 @@
 .toolbar-btn.active {
   background: var(--color-primary-light);
   color: var(--color-primary);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+  font-weight: 600;
+}
+
+.toolbar-btn:active {
+  transform: scale(0.96);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.toolbar-export-btn {
+  margin-left: auto;
+  color: var(--color-primary);
+  background: var(--color-primary-lighter);
+}
+
+.toolbar-export-btn:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.toolbar-export-btn.exporting {
+  animation: export-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes export-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
 }
 
 .toolbar-btn-small {
