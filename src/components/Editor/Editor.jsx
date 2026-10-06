@@ -641,6 +641,130 @@ function readImageAsDataUrl(file) {
   })
 }
 
+// ---------------------------------------------------------------
+// LIVE-SYNC HELPERS
+// Changes travel as small edits and are applied to the page piece by piece,
+// so the whole document is never re-sent or re-drawn for one typed letter.
+// ---------------------------------------------------------------
+const LOCAL_ORIGIN = 'editor-input' // marks Yjs changes that came from this editor's own typing
+
+const isHighSurrogate = (code) => code >= 0xd800 && code <= 0xdbff
+const isLowSurrogate = (code) => code >= 0xdc00 && code <= 0xdfff
+
+// Writes only the part of the text that changed (not delete-everything + insert-everything)
+function syncTextToYjs(ytext, ydoc, next) {
+  const cur = ytext.toString()
+  if (cur === next) return
+  const max = Math.min(cur.length, next.length)
+  let p = 0
+  while (p < max && cur.charCodeAt(p) === next.charCodeAt(p)) p++
+  let s = 0
+  while (s < max - p && cur.charCodeAt(cur.length - 1 - s) === next.charCodeAt(next.length - 1 - s)) s++
+  // never cut an emoji (surrogate pair) in half
+  if (p > 0 && isHighSurrogate(cur.charCodeAt(p - 1))) p--
+  if (s > 0 && isLowSurrogate(cur.charCodeAt(cur.length - s))) s--
+  ydoc.transact(() => {
+    const removeCount = cur.length - p - s
+    if (removeCount > 0) ytext.delete(p, removeCount)
+    const added = next.slice(p, next.length - s)
+    if (added) ytext.insert(p, added)
+  }, LOCAL_ORIGIN)
+}
+
+// Caret position as "number of text characters before it"
+function textOffsetOf(root, node, offset) {
+  const range = document.createRange()
+  range.selectNodeContents(root)
+  range.setEnd(node, offset)
+  return range.toString().length
+}
+
+// The opposite: where in the page is the n-th text character?
+function pointAtTextOffset(root, target) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let remaining = target
+  let last = null
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    last = node
+    if (remaining <= node.nodeValue.length) return { node, offset: remaining }
+    remaining -= node.nodeValue.length
+  }
+  return last ? { node: last, offset: last.nodeValue.length } : { node: root, offset: root.childNodes.length }
+}
+
+// Makes the editor show `html`, replacing only the top-level blocks that really differ.
+// Untouched paragraphs, pictures and spreadsheets stay exactly as they are (no flicker).
+function patchChildren(el, html) {
+  const box = document.createElement('template')
+  box.innerHTML = html
+  const next = Array.from(box.content.childNodes)
+  const cur = Array.from(el.childNodes)
+
+  let start = 0
+  while (start < cur.length && start < next.length && cur[start].isEqualNode(next[start])) start++
+  let endCur = cur.length
+  let endNext = next.length
+  while (endCur > start && endNext > start && cur[endCur - 1].isEqualNode(next[endNext - 1])) {
+    endCur--
+    endNext--
+  }
+
+  const before = endCur < cur.length ? cur[endCur] : null
+  for (let k = start; k < endCur; k++) el.removeChild(cur[k])
+  for (let k = start; k < endNext; k++) el.insertBefore(next[k], before)
+}
+
+// Shows shared text from the room in the editor and keeps the reader's caret where it was
+function applySharedHtml(el, html) {
+  if (el.innerHTML === html) return
+
+  const sel = window.getSelection()
+  let saved = null
+  if (
+    document.activeElement === el &&
+    sel &&
+    sel.rangeCount &&
+    el.contains(sel.anchorNode) &&
+    el.contains(sel.focusNode)
+  ) {
+    saved = {
+      oldText: el.textContent,
+      anchor: textOffsetOf(el, sel.anchorNode, sel.anchorOffset),
+      focus: textOffsetOf(el, sel.focusNode, sel.focusOffset),
+    }
+  }
+
+  patchChildren(el, html)
+
+  if (!saved) return
+  const after = window.getSelection()
+  const kept =
+    after &&
+    after.rangeCount &&
+    after.anchorNode !== el &&
+    el.contains(after.anchorNode) &&
+    el.contains(after.focusNode)
+  if (kept) return // the caret sits in a block that was not touched
+
+  // The caret's block was replaced: put the caret back at the same place in the text
+  const oldText = saved.oldText
+  const newText = el.textContent
+  const max = Math.min(oldText.length, newText.length)
+  let p = 0
+  while (p < max && oldText.charCodeAt(p) === newText.charCodeAt(p)) p++
+  let s = 0
+  while (s < max - p && oldText.charCodeAt(oldText.length - 1 - s) === newText.charCodeAt(newText.length - 1 - s)) s++
+  const shift = (offset) => {
+    if (offset <= p) return offset
+    if (offset >= oldText.length - s) return offset + (newText.length - oldText.length)
+    return newText.length - s // it was inside the changed part: end of the new text
+  }
+  const a = pointAtTextOffset(el, Math.max(0, shift(saved.anchor)))
+  const f = pointAtTextOffset(el, Math.max(0, shift(saved.focus)))
+  after.setBaseAndExtent(a.node, a.offset, f.node, f.offset)
+}
+
 // roomCode decides which live "room" this editor syncs to - everyone using the
 // same room code edits the same shared document.
 // role: 'host' (created the room) or 'collab' (joined it - needs the host's approval)
@@ -675,7 +799,6 @@ function Editor({
   const ydocRef = useRef(null)
   const ytextRef = useRef(null)
   const providerRef = useRef(null)
-  const isLocalUpdate = useRef(false) // guards against feedback loops
   const lastHtmlRef = useRef('') // last html we sent/received, to skip pointless syncs
   const savedRangeRef = useRef(null) // where the caret was, for toolbar buttons / file dialogs
   const currentCellRef = useRef(null) // spreadsheet cell the caret is in
@@ -698,6 +821,7 @@ function Editor({
   const [access, setAccess] = useState(role === 'host' ? 'granted' : 'pending')
   const [pending, setPending] = useState([]) // host: people waiting to be let in
   const [people, setPeople] = useState([]) // everyone allowed in the room (for the colour key)
+  const [synced, setSynced] = useState(false) // true once the room's saved state (incl. approvals) has arrived
   const [sheetCell, setSheetCell] = useState(null) // { ref, content } shown in the formula bar
   const [exportingPdf, setExportingPdf] = useState(false)
 
@@ -752,6 +876,7 @@ function Editor({
 
   // Set up the shared Yjs document + WebSocket connection (again whenever the room changes)
   useEffect(() => {
+    setSynced(false)
     const ydoc = new Y.Doc()
     const provider = new WebsocketProvider(WS_URL, roomName, ydoc, { params: { token: getToken() || '' } })
     const ytext = ydoc.getText('content')
@@ -792,7 +917,7 @@ function Editor({
       if (!el || ytext.length === 0) return
       const html = ytext.toString()
       if (el.innerHTML !== html) {
-        el.innerHTML = html
+        applySharedHtml(el, html)
         lastHtmlRef.current = el.innerHTML
         snapshotUnits()
         if (onRemoteChangeRef.current) {
@@ -807,6 +932,9 @@ function Editor({
     }
     publishSelf()
     if (!isHost) provider.awareness.setLocalStateField('joinRequest', myRequest)
+
+    let lastPeopleSig = '' // what was last reported, so an unchanged list is never re-sent
+    let lastWaitingSig = ''
 
     const emitPresence = () => {
       // One entry per ACCOUNT (userId), never per socket: awareness has one state per
@@ -838,10 +966,18 @@ function Editor({
       const list = Array.from(byUser.values())
       const waiting = Array.from(waitingByUser.values())
       list.sort((a, b) => (b.role === 'host') - (a.role === 'host')) // host first
-      setPeople(list)
-      if (onPresenceRef.current) onPresenceRef.current(list)
+      const peopleSig = JSON.stringify(list.map((p) => [p.id, p.name, p.color, p.role, p.isSelf]))
+      if (peopleSig !== lastPeopleSig) {
+        lastPeopleSig = peopleSig
+        setPeople(list)
+        if (onPresenceRef.current) onPresenceRef.current(list)
+      }
       if (isHost) {
-        setPending(waiting)
+        const waitingSig = JSON.stringify(waiting.map((p) => [p.clientId, p.id, p.name, p.color, p.req]))
+        if (waitingSig !== lastWaitingSig) {
+          lastWaitingSig = waitingSig
+          setPending(waiting)
+        }
         waiting.forEach((p) => {
           const key = `${p.id}:${p.req}`
           if (!notifiedRef.current.has(key)) {
@@ -941,17 +1077,14 @@ function Editor({
     // Whenever the shared text changes (from ANY user, including this one),
     // reflect it in the DOM - but skip re-rendering if this change came
     // from our own typing (we already updated the DOM directly).
-    const updateDOM = () => {
-      if (isLocalUpdate.current) {
-        isLocalUpdate.current = false
-        return
-      }
+    const updateDOM = (event, transaction) => {
+      if (transaction && transaction.origin === LOCAL_ORIGIN) return // our own typing: the page already shows it
       if (accessRef.current !== 'granted') return // not approved yet: keep the shared text hidden
       const el = editorRef.current
       if (el) {
         const newHtml = ytext.toString()
         if (el.innerHTML !== newHtml) {
-          el.innerHTML = newHtml
+          applySharedHtml(el, newHtml)
           lastHtmlRef.current = el.innerHTML
           snapshotUnits()
           if (onRemoteChangeRef.current) {
@@ -968,6 +1101,7 @@ function Editor({
     provider.on('sync', (isSynced) => {
       if (isSynced) {
         synced = true
+        setSynced(true)
         if (ytext.length > 0) {
           if (accessRef.current === 'granted') loadSharedIntoDom()
         } else if (initialHtml && isHost) {
@@ -1090,13 +1224,7 @@ function Editor({
     // to every other connected user.
     const ytext = ytextRef.current
     const ydoc = ydocRef.current
-    if (ytext && ydoc) {
-      isLocalUpdate.current = true
-      ydoc.transact(() => {
-        ytext.delete(0, ytext.length)
-        ytext.insert(0, el.innerHTML)
-      })
-    }
+    if (ytext && ydoc) syncTextToYjs(ytext, ydoc, el.innerHTML)
 
     // Keep the formula bar in step with the cell being typed in
     const td = currentCellRef.current
@@ -1551,9 +1679,11 @@ function Editor({
       {/* Collaborator waiting for the host */}
       {access !== 'granted' && (
         <div className={`access-banner ${access}`} role="status">
-          {access === 'pending'
-            ? 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'
-            : 'The host declined your request. Use Leave to go back to your own document.'}
+          {!synced
+            ? 'Connecting to the room...'
+            : access === 'pending'
+              ? 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'
+              : 'The host declined your request. Use Leave to go back to your own document.'}
         </div>
       )}
 

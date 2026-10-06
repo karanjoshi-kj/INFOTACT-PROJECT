@@ -68,15 +68,42 @@ export function getDocument(id) {
   return request(`/documents/${id}`)
 }
 
-// Send only the fields you want to change: { html }, { title }, { folder }, { toolState } or any mix.
+// Send only the fields you want to change: { html }, { title }, { folder }, { toolState }, { roomCode } or any mix.
 // folder: a folder id to move the document into, or null for the top level.
-export function saveDocument(id, { html, title, folder, toolState }, { keepalive = false } = {}) {
+// roomCode: the live room this document is linked to (the server uses it for the "!" offline marks).
+export function saveDocument(id, { html, title, folder, toolState, roomCode }, { keepalive = false } = {}) {
   const body = {}
   if (html !== undefined) body.html = html
   if (title !== undefined) body.title = title
   if (folder !== undefined) body.folder = folder
   if (toolState !== undefined) body.toolState = toolState
+  if (roomCode !== undefined) body.roomCode = roomCode
   return request(`/documents/${id}`, { method: 'PUT', body, keepalive })
+}
+
+// Documents that were changed by someone else while you were offline -> { documents: [{ id, roomCode, ... }] }
+export function listOfflineChanges() {
+  return request('/documents/offline-changes')
+}
+
+// Tell the server this document now has the latest room content (clears its "!" mark)
+export function ackDocumentSynced(id) {
+  return request(`/documents/${id}/synced`, { method: 'POST' })
+}
+
+// Documents that have a room you created or joined ("Collab Files") -> { collabDocuments: [{ id, title, room, role }] }
+export function listCollabDocuments() {
+  return request('/collab')
+}
+
+// A room was created / joined for this document: it becomes a collaborative document (role: 'host' | 'collab')
+export function markDocumentCollab(id, { roomCode, role }) {
+  return request(`/collab/${id}`, { method: 'PUT', body: { roomCode, role } })
+}
+
+// The document is a normal single-user document again (you left the room)
+export function unmarkDocumentCollab(id) {
+  return request(`/collab/${id}`, { method: 'DELETE' })
 }
 
 export async function exportDocumentPdf(id, { html, title, toolState } = {}) {

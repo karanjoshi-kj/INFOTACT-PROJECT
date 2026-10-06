@@ -4,15 +4,43 @@ import TitleBar from '../components/Layout/TitleBar.jsx'
 import Editor from '../components/Editor/Editor.jsx'
 import FileExplorer from '../components/Sidebar/FileExplorer.jsx'
 import { getUser, clearSession } from '../utils/auth.js'
-import { createDocument, getDocument, saveDocument, listDocuments } from '../services/api.js'
+import {
+  createDocument,
+  getDocument,
+  saveDocument,
+  listDocuments,
+  listOfflineChanges,
+  ackDocumentSynced,
+  listCollabDocuments,
+  markDocumentCollab,
+  unmarkDocumentCollab,
+} from '../services/api.js'
 import useSharedTitle from '../hooks/useSharedTitle.js'
 import './EditorPage.css'
 
 const SAVE_DELAY = 1000 // ms of no typing before we save (the "debounce")
 const RETRY_DELAY = 4000 // ms before retrying a failed save
 const RECENT_ROOMS_KEY = 'syncdoc-recent-rooms'
-const COLLAB_DOCS_KEY = 'syncdoc-collab-docs'
+const NO_PEERS = [] // stable empty list (a solo document has no collaborators)
 const HOST_COLOR = '#f59e0b' // same host colour as the editor and title bar
+const OFFLINE_POLL_MS = 8000 // how often the "changed while you were offline" marks are refreshed
+
+// The small "!" shown beside a document that was changed while you were offline
+const OFFLINE_FLAG_STYLE = {
+  flexShrink: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 16,
+  height: 16,
+  marginLeft: 4,
+  borderRadius: '50%',
+  background: '#ef4444',
+  color: '#fff',
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1,
+}
 
 // ---------------------------------------------------------------
 // ICONS
@@ -176,18 +204,6 @@ const writeRole = (user, code, role) => {
   }
 }
 
-// Documents you share or joined (shown in "Collab Files")
-const collabKey = (user) => `${COLLAB_DOCS_KEY}-${user?.id || 'anon'}`
-
-const readCollabDocs = (user) => {
-  try {
-    const list = JSON.parse(localStorage.getItem(collabKey(user)) || '[]')
-    return Array.isArray(list) ? list : []
-  } catch {
-    return []
-  }
-}
-
 // Generate a random room code
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -261,7 +277,8 @@ function EditorPage() {
   const [theme, setTheme] = useState(getInitialTheme)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   const [loadedDocId, setLoadedDocId] = useState(null) // the document whose title is in `title`
-  const [peers, setPeers] = useState([]) // real people in the room (from the editor)
+  // People in the room, tagged with the document + room they belong to (see `scope` below)
+  const [presence, setPresence] = useState({ scope: '', list: [] })
   const [roomCode, setRoomCode] = useState('')
   const [roomCodeCopied, setRoomCodeCopied] = useState(false)
   const [roomLinkCopied, setRoomLinkCopied] = useState(false)
@@ -273,16 +290,41 @@ function EditorPage() {
   const navigate = useNavigate()
   const user = getUser()
 
+  const docIdRef = useRef(null) // the document that is currently loaded
   const [roomRole, setRoomRole] = useState('host') // 'host' | 'collab' - your role in the current room
-  const [roomAccess, setRoomAccess] = useState('granted') // 'granted' | 'pending' | 'denied'
-  const [collabDocs, setCollabDocs] = useState(() => readCollabDocs(user)) // shown in "Collab Files"
+  const [accessState, setAccessState] = useState({ scope: '', value: 'granted' }) // access, tagged with its document + room
+  const [collabDocs, setCollabDocs] = useState([]) // shown in "Collab Files" (loaded from the server)
+  const [offlineDocIds, setOfflineDocIds] = useState([]) // documents changed while you were offline (from the server)
+
+  // Collaboration state belongs to ONE document + ONE room. Anything reported by an editor
+  // (people online, access) is stored with that scope, and is only used while the open
+  // document and room still match it. A late report from a previous document is ignored.
+  const scope = `${docId || ''}|${roomCode}`
+  const peers = presence.scope === scope ? presence.list : NO_PEERS
+  const roomAccess = accessState.scope === scope ? accessState.value : roomRole === 'host' ? 'granted' : 'pending'
+  const handlePresenceChange = (list) => setPresence({ scope, list })
+  const handleAccessChange = (value) => setAccessState({ scope, value })
 
   const collaboratorCount = Math.max(1, peers.length)
+
+  // The colour indicator and the "N collaborators online" status belong to ONE thing only:
+  // the document that is open right now, while it has an active room (hosted, joined, or shared).
+  // It is worked out from this document's own state, never from rooms used on other documents.
+  const collabActive =
+    loadState === 'ready' &&
+    !!docId &&
+    docId !== 'new' &&
+    loadedDocId === docId &&
+    docIdRef.current === docId &&
+    !!roomCode &&
+    roomAccess !== 'denied' &&
+    (roomRole === 'collab' ||
+      peers.length > 1 ||
+      collabDocs.some((e) => e.id === docId && e.room === roomCode))
 
   // Always holds the newest { html, text } from the editor.
   const latestContentRef = useRef({ html: '', text: '' })
   const titleRef = useRef('Untitled Document')
-  const docIdRef = useRef(null) // the document that is currently loaded
   const dirtyRef = useRef({ html: false, title: false, toolState: false }) // what still needs saving
   const toolStateRef = useRef(null) // latest tool state from the editor
   const debounceTimerRef = useRef(null)
@@ -290,6 +332,8 @@ function EditorPage() {
   const toastTimerRef = useRef(null)
   const isSavingRef = useRef(false)
   const creatingRef = useRef(false) // stops React StrictMode from creating 2 documents
+  const refreshFlagsRef = useRef(null) // always the newest "refresh the ! marks" function
+  const collabSavedRef = useRef({}) // docId -> "role:room" that the server already knows as collaborative
 
   // Apply theme to the whole document and remember the choice
   useEffect(() => {
@@ -334,8 +378,46 @@ function EditorPage() {
   }
 
   // ---------------------------------------------------------------
+  // OFFLINE CHANGE MARKS ("!" beside a document changed while you were offline)
+  // The server decides which documents get a mark; this only asks for the list.
+  // ---------------------------------------------------------------
+  const refreshOfflineFlags = async () => {
+    try {
+      const data = await listOfflineChanges()
+      const ids = (data.documents || []).map((d) => d.id).sort()
+      setOfflineDocIds((prev) => (prev.length === ids.length && prev.every((x, k) => x === ids[k]) ? prev : ids))
+    } catch (err) {
+      if (err.status === 401) goToLogin()
+    }
+  }
+  refreshFlagsRef.current = refreshOfflineFlags
+
+  useEffect(() => {
+    refreshFlagsRef.current()
+    const timer = setInterval(() => refreshFlagsRef.current(), OFFLINE_POLL_MS)
+    const onFocus = () => refreshFlagsRef.current()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
+  // The room's latest content has reached this document: tell the server so the "!" goes away
+  const handleRoomSynced = () => {
+    const id = docIdRef.current
+    if (!id) return
+    ackDocumentSynced(id)
+      .then(() => refreshFlagsRef.current())
+      .catch((err) => {
+        if (err.status === 401) goToLogin()
+      })
+  }
+
+  // ---------------------------------------------------------------
   // COLLAB FILES (documents you share or joined)
   // ---------------------------------------------------------------
+  // The server remembers (in MongoDB) which documents have a room that was created or joined.
   const markCollab = useCallback((role, code) => {
     const id = docIdRef.current
     if (!id || !code) return
@@ -345,18 +427,36 @@ function EditorPage() {
       if (existing && existing.room === code && existing.role === role && existing.title === entry.title) return prev
       return existing ? prev.map((e) => (e.id === id ? entry : e)) : [entry, ...prev]
     })
+    const key = `${role}:${code}`
+    if (collabSavedRef.current[id] === key) return // the server already knows this
+    collabSavedRef.current[id] = key
+    markDocumentCollab(id, { roomCode: code, role }).catch((err) => {
+      if (collabSavedRef.current[id] === key) delete collabSavedRef.current[id] // try again next time
+      if (err.status === 401) goToLogin()
+    })
   }, [])
 
-  const removeCollab = useCallback((id) => {
+  // persist = false when the document itself no longer exists (nothing to update on the server)
+  const removeCollab = useCallback((id, persist = true) => {
     if (!id) return
     setCollabDocs((prev) => (prev.some((e) => e.id === id) ? prev.filter((e) => e.id !== id) : prev))
+    delete collabSavedRef.current[id]
+    if (persist) {
+      unmarkDocumentCollab(id).catch((err) => {
+        if (err.status === 401) goToLogin()
+      })
+    }
   }, [])
 
   // A document becomes a collab file when you join a room, or when someone joins yours
   useEffect(() => {
     if (loadState !== 'ready' || !roomCode) return
+    if (roomRole === 'collab' && roomAccess === 'denied') {
+      removeCollab(docIdRef.current) // the host refused you: this is not a collaboration
+      return
+    }
     if (roomRole === 'collab' || peers.length > 1) markCollab(roomRole, roomCode)
-  }, [loadState, roomCode, roomRole, peers.length, markCollab])
+  }, [loadState, roomCode, roomRole, roomAccess, peers.length, markCollab, removeCollab])
 
   // Keep the title in the Collab Files list current
   useEffect(() => {
@@ -368,31 +468,31 @@ function EditorPage() {
     )
   }, [loadedDocId, title])
 
-  // Remember the list
-  useEffect(() => {
-    try {
-      localStorage.setItem(collabKey(user), JSON.stringify(collabDocs))
-    } catch {
-      // ignore storage errors
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collabDocs])
-
-  // Drop documents that no longer exist (and refresh the names of the others)
+  // Load the collaborative documents from the server (only documents that have a created / joined room)
   useEffect(() => {
     let cancelled = false
-    listDocuments()
+    listCollabDocuments()
       .then((data) => {
         if (cancelled) return
-        const docs = data.documents || []
+        const fromServer = data.collabDocuments || []
+        fromServer.forEach((e) => {
+          collabSavedRef.current[e.id] = `${e.role}:${e.room}`
+        })
         setCollabDocs((prev) => {
-          const next = prev
-            .filter((e) => docs.some((d) => d._id === e.id))
-            .map((e) => {
-              const d = docs.find((x) => x._id === e.id)
-              return d && d.title !== e.title && e.id !== docIdRef.current ? { ...e, title: d.title } : e
-            })
-          return next.length === prev.length && next.every((e, k) => e === prev[k]) ? prev : next
+          const open = docIdRef.current
+          const next = fromServer.map((e) => {
+            const old = prev.find((p) => p.id === e.id)
+            return e.id === open && old ? { ...e, title: old.title } : e // the open document keeps its newest title
+          })
+          // the open document was just marked and the server list was read a moment too early
+          const justMarked = prev.find((p) => p.id === open && !next.some((n) => n.id === open))
+          if (justMarked) next.unshift(justMarked)
+          const same =
+            next.length === prev.length &&
+            next.every(
+              (e, k) => e.id === prev[k].id && e.title === prev[k].title && e.room === prev[k].room && e.role === prev[k].role
+            )
+          return same ? prev : next
         })
       })
       .catch((err) => {
@@ -419,20 +519,25 @@ function EditorPage() {
   }, [])
 
   // Switch the open document to a (new or joined) room
-  const applyRoom = (code, role = 'host') => {
+  const applyRoom = (code, role = 'host', collab = false) => {
     // The editor restarts for the new room, so hand it the newest text (not the text from first load)
     setInitialHtml(latestContentRef.current.html)
-    setPeers([])
+    setPresence({ scope: '', list: [] })
     setRoomRole(role)
     setRoomCode(code)
     writeRole(user, code, role)
-    if (role === 'host') removeCollab(docIdRef.current) // a fresh private room is not a collab file (yet)
+    if (role === 'host' && !collab) removeCollab(docIdRef.current) // a fresh private room is not a collab file (yet)
+    if (collab) markCollab(role, code) // a room that was created or joined on purpose
     if (docIdRef.current) {
       try {
         localStorage.setItem(roomKey(docIdRef.current), code)
       } catch {
         // ignore storage errors
       }
+      // the server remembers which room this document belongs to (for the offline marks)
+      saveDocument(docIdRef.current, { roomCode: code })
+        .then(() => refreshFlagsRef.current())
+        .catch(() => { })
     }
     addRecentRoom(code)
   }
@@ -457,7 +562,7 @@ function EditorPage() {
     )
     if (!ok) return false
     const role = readRole(user, code) || 'collab' // your own old room = host, anyone else's = collaborator
-    applyRoom(code, role)
+    applyRoom(code, role, true)
     showToast(
       role === 'collab' ? `Joined room ${code} - waiting for the host to approve you` : `Joined room ${code}`,
       'success'
@@ -467,7 +572,7 @@ function EditorPage() {
 
   const handleNewRoomCode = () => {
     const code = generateRoomCode()
-    applyRoom(code, 'host')
+    applyRoom(code, 'host', true)
     showToast(`New room ${code} is ready - share the code or link`, 'success')
   }
 
@@ -591,7 +696,12 @@ function EditorPage() {
     setLoadState('loading')
     setSaveStatus('Loading...')
     setSaveProgress(0)
-    setPeers([]) // the people of the previous document are not in this one
+    // Nothing of the previous document's room may stay behind: the next document starts with no room,
+    // no people, no role and no access until its own room is known.
+    setPresence({ scope: '', list: [] })
+    setAccessState({ scope: '', value: 'granted' })
+    setRoomRole('host')
+    setRoomCode('')
 
     getDocument(docId)
       .then((data) => {
@@ -628,6 +738,12 @@ function EditorPage() {
         writeRole(user, code, role)
         setRoomRole(role)
         setRoomCode(code)
+        if (data.document.roomCode !== code) {
+          // the server remembers which room this document belongs to (for the offline marks)
+          saveDocument(docId, { roomCode: code })
+            .then(() => refreshFlagsRef.current())
+            .catch(() => { })
+        }
         if (fromLink.length >= 4) {
           addRecentRoom(code)
           showToast(`Joined room ${code}`, 'success')
@@ -804,6 +920,7 @@ function EditorPage() {
     access: roomAccess,
     getTitle: () => titleRef.current,
     onRemoteTitle: handleRemoteTitle,
+    onSynced: handleRoomSynced,
   })
 
   const handleTitleChange = (newTitle) => {
@@ -852,7 +969,7 @@ function EditorPage() {
     clearTimeout(retryTimerRef.current)
     dirtyRef.current = { html: false, title: false, toolState: false } // never save into a deleted document
     docIdRef.current = null
-    removeCollab(deletedId)
+    removeCollab(deletedId, false)
     try {
       localStorage.removeItem(lastDocKey(user))
     } catch {
@@ -1030,6 +1147,11 @@ function EditorPage() {
                     {e.role === 'host' ? ' · Host' : ' · Collaborator'}
                   </small>
                 </span>
+                {offlineDocIds.includes(e.id) && (
+                  <span style={OFFLINE_FLAG_STYLE} title="Changed while you were offline" aria-label="Changed while you were offline">
+                    !
+                  </span>
+                )}
                 {e.role === 'host' && (
                   <span className="collab-host-badge" title="You are the host">
                     <CrownIcon />
@@ -1044,6 +1166,7 @@ function EditorPage() {
         <div className="sidebar-files-section">
           <FileExplorer
             activeDocId={docId}
+            offlineDocIds={offlineDocIds}
             titleInfo={loadedDocId ? { id: loadedDocId, title } : null}
             onOpenDocument={handleOpenDocument}
             onDocumentRenamed={handleDocumentRenamed}
@@ -1063,6 +1186,7 @@ function EditorPage() {
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
           peers={peers}
+          collabActive={collabActive}
           roomCode={roomCode}
           role={roomRole}
           onJoinRoom={handleJoinRoom}
@@ -1070,7 +1194,18 @@ function EditorPage() {
         />
 
         <main className="editor-page-main">
-          <div className="editor-container">
+          <div className={`editor-container ${collabActive ? '' : 'collab-off'}`}>
+            {/* Solo document (no active room): hide every collaborator colour mark */}
+            <style>{`
+              .editor-container.collab-off .editor-content [data-author] {
+                box-shadow: none !important;
+                background-image: none !important;
+                padding-left: 0 !important;
+              }
+              .editor-container.collab-off .author-legend {
+                display: none !important;
+              }
+            `}</style>
             {loadState === 'ready' && (
               <Editor
                 key={`${docId}-${roomCode}`}
@@ -1084,8 +1219,8 @@ function EditorPage() {
                 onChange={handleContentChange}
                 onRemoteChange={handleRemoteChange}
                 onToolStateChange={handleToolStateChange}
-                onPresenceChange={setPeers}
-                onAccessChange={setRoomAccess}
+                onPresenceChange={handlePresenceChange}
+                onAccessChange={handleAccessChange}
                 onNotify={showToast}
               />
             )}
@@ -1123,10 +1258,14 @@ function EditorPage() {
             <span className="footer-user-name">
               Logged in as <b>{user?.name || 'User'}</b>
             </span>
-            <span className="footer-divider"></span>
-            <span className="footer-collaborators">
-              {collaboratorCount} collaborator{collaboratorCount === 1 ? '' : 's'} online
-            </span>
+            {collabActive && (
+              <>
+                <span className="footer-divider"></span>
+                <span className="footer-collaborators">
+                  {collaboratorCount} collaborator{collaboratorCount === 1 ? '' : 's'} online
+                </span>
+              </>
+            )}
           </div>
 
           <div className="footer-center">

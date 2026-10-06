@@ -1,7 +1,13 @@
 import AuthPage from './AuthPage.jsx'
+import './PaperCutBackground.css'
+import './LoginChains.css'
 
 function LoginPage() {
-  return <AuthPage initialMode="signin" />
+  return (
+    <div className="login-route">
+      <AuthPage initialMode="signin" />
+    </div>
+  )
 }
 
 export default LoginPage

@@ -59,6 +59,7 @@ function TitleBar({
   sidebarOpen,
   onToggleSidebar,
   peers = [],
+  collabActive = false,
   roomCode = '',
   onJoinRoom,
 }) {
@@ -176,32 +177,36 @@ function TitleBar({
         </div>
       </div>
 
-      {/* ---------- middle: who is online ---------- */}
-      <div className="title-bar-center">
-        <div className="collaborator-avatars">
-          {shown.map((p, i) => (
-            <div
-              key={p.id}
-              className="collaborator-avatar"
-              style={{ backgroundColor: p.color, zIndex: 10 - i }}
-              title={p.name}
-            >
-              <span>{getInitials(p.name)}</span>
-            </div>
-          ))}
-          {extra > 0 && (
-            <div className="collaborator-avatar collaborator-more" style={{ zIndex: 0 }}>
-              <span>+{extra}</span>
-            </div>
-          )}
+      {/* ---------- middle: who is online (only while this document has an active room) ---------- */}
+      {collabActive ? (
+        <div className="title-bar-center">
+          <div className="collaborator-avatars">
+            {shown.map((p, i) => (
+              <div
+                key={p.id}
+                className="collaborator-avatar"
+                style={{ backgroundColor: p.color, zIndex: 10 - i }}
+                title={p.name}
+              >
+                <span>{getInitials(p.name)}</span>
+              </div>
+            ))}
+            {extra > 0 && (
+              <div className="collaborator-avatar collaborator-more" style={{ zIndex: 0 }}>
+                <span>+{extra}</span>
+              </div>
+            )}
+          </div>
+          <div className="collaborator-status">
+            <span className="collaborator-dot" />
+            <span>
+              {people.length} collaborator{people.length === 1 ? '' : 's'} online
+            </span>
+          </div>
         </div>
-        <div className="collaborator-status">
-          <span className="collaborator-dot" />
-          <span>
-            {people.length} collaborator{people.length === 1 ? '' : 's'} online
-          </span>
-        </div>
-      </div>
+      ) : (
+        <div className="title-bar-center" />
+      )}
 
       {/* ---------- right: join a room + user ---------- */}
       <div className="title-bar-right">
