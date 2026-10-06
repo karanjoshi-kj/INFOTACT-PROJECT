@@ -204,7 +204,10 @@ router.post("/", async (req, res) => {
 // Load: the document + ready-to-use html for the editor
 router.get("/:id", checkId, async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findOne({
+     _id: req.params.id,
+     owner: req.userId,
+    });
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
     const html = doc.html !== null && doc.html !== undefined ? doc.html : astToHtml(doc.children);
@@ -225,7 +228,10 @@ router.get("/:id", checkId, async (req, res) => {
 router.put("/:id", checkId, async (req, res) => {
   try {
     const { html, title, folder, toolState } = req.body;
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findOne({
+      _id: req.params.id,
+      owner: req.userId,
+    });
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
     if (typeof html === "string") {
@@ -279,7 +285,10 @@ router.put("/:id", checkId, async (req, res) => {
 // POST optionally accepts the latest { html, title } to ensure the newest document state is saved before export.
 async function handleExportPdf(req, res) {
   try {
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findOne({
+      _id: req.params.id,
+      owner: req.userId,
+    });
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
     // If client supplied unsaved title or html in POST, save it first

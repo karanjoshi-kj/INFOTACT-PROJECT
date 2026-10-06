@@ -1,17 +1,39 @@
 const express = require("express");
 const Room = require("../models/Room");
+const Document = require("../models/Document");
+const requireAuth = require("../middleware/auth");
 
 const router = express.Router();
+
+// Every room route requires a logged-in user
+router.use(requireAuth);
 
 // Create a new room
 router.post("/", async (req, res) => {
   try {
-    const { roomCode, hostId, documentId } = req.body;
+    const { roomCode, documentId } = req.body;
 
-    if (!roomCode || !hostId || !documentId) {
+    // The host is always the authenticated user.
+    // Never trust hostId from the client.
+    const hostId = req.userId;
+
+    if (!roomCode || !documentId) {
       return res.status(400).json({
         success: false,
-        message: "roomCode, hostId and documentId are required",
+        message: "roomCode and documentId are required",
+      });
+    }
+
+    // Make sure the document belongs to the logged-in user.
+    const document = await Document.findOne({
+      _id: documentId,
+      owner: req.userId,
+    });
+
+    if (!document) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only create a room for your own document",
       });
     }
 
@@ -54,12 +76,16 @@ router.post("/", async (req, res) => {
 // Join an existing room
 router.post("/join", async (req, res) => {
   try {
-    const { roomCode, userId } = req.body;
+    const { roomCode } = req.body;
 
-    if (!roomCode || !userId) {
+    // The joining user is always the authenticated user.
+    // Never trust userId from the client.
+    const userId = req.userId;
+
+    if (!roomCode) {
       return res.status(400).json({
         success: false,
-        message: "roomCode and userId are required",
+        message: "roomCode is required",
       });
     }
 
@@ -127,6 +153,14 @@ router.patch("/:roomCode/members/:userId", async (req, res) => {
       });
     }
 
+    // Only the room host can manage member status.
+    if (String(room.hostId) !== String(req.userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the room host can manage members",
+      });
+    }
+
     const member = room.members.find(
       (member) => member.userId.toString() === userId
     );
@@ -160,7 +194,11 @@ router.patch("/:roomCode/members/:userId", async (req, res) => {
 // Leave a room
 router.delete("/:roomCode/members/:userId", async (req, res) => {
   try {
-    const { roomCode, userId } = req.params;
+    const { roomCode } = req.params;
+
+    // A user can only remove themselves.
+    // Never trust userId from the URL.
+    const userId = req.userId;
 
     const room = await Room.findOne({ roomCode });
 
