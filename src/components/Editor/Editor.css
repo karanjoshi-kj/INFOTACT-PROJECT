@@ -13,8 +13,8 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin: 0 18px 18px;
-  padding: 22px 28px 30px;
+  margin: 0 8px 8px;
+  padding: 12px 14px 18px;
   background: var(--color-surface-soft);
   border-radius: var(--radius-xl);
   border: 1px solid var(--color-border-light);
@@ -22,10 +22,10 @@
 
 /* The paper you type on */
 .editor-content {
-  max-width: 880px;
+  max-width: 1240px;
   min-height: 100%;
   margin: 0 auto;
-  padding: 34px 44px 48px;
+  padding: 28px 40px 44px;
   background: var(--color-surface);
   border-radius: 10px;
   box-shadow: 0 2px 14px rgba(94, 114, 180, 0.1);
@@ -247,7 +247,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 18px 10px;
+  margin: 0 8px 8px;
   font-size: 12px;
   color: var(--color-text-muted);
 }
@@ -287,7 +287,7 @@
 
 /* ---- collaborator waiting for the host ---- */
 .access-banner {
-  margin: 0 18px 12px;
+  margin: 0 8px 8px;
   padding: 10px 14px;
   border-radius: 12px;
   background: rgba(245, 158, 11, 0.14);
@@ -427,17 +427,17 @@
 
 @media (max-width: 900px) {
   .editor-scroll {
-    margin: 0 10px 10px;
-    padding: 12px;
+    margin: 0 6px 6px;
+    padding: 8px;
   }
 
   .editor-content {
-    padding: 22px 20px 32px;
+    padding: 18px 16px 28px;
   }
 
   .author-legend,
   .access-banner {
-    margin-left: 10px;
-    margin-right: 10px;
+    margin-left: 6px;
+    margin-right: 6px;
   }
 }

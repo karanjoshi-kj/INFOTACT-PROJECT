@@ -5,6 +5,7 @@ const authRoutes = require("./routes/authRoutes");
 const documentRoutes = require("./routes/documentRoutes");
 const folderRoutes = require("./routes/folderRoutes");
 const roomRoutes = require("./routes/roomRoutes");
+const collabRoutes = require("./routes/collabRoutes");
 
 const app = express();
 
@@ -19,5 +20,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/folders", folderRoutes);
 app.use("/api/rooms", roomRoutes);
+app.use("/api/collab", collabRoutes);
 
 module.exports = app;

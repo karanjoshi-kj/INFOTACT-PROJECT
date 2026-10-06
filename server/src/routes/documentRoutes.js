@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const cheerio = require("cheerio");
 const Document = require("../models/Document");
 const Folder = require("../models/Folder");
+const OfflineChange = require("../models/OfflineChange");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
 const { generateDocumentPdf } = require("../utils/pdfExport");
@@ -189,6 +190,42 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Which of the logged-in user's documents were changed by someone else while the user was
+// offline. The editor shows a small "!" next to each of them in the file list.
+// (Must stay above "/:id" so "offline-changes" is not read as a document id.)
+router.get("/offline-changes", async (req, res) => {
+  try {
+    const userId = String(req.userId);
+    const docs = await Document.find({ owner: req.userId, roomCode: { $ne: null } })
+      .select("_id roomCode")
+      .lean();
+
+    const roomCodes = [...new Set(docs.map((d) => d.roomCode))];
+    const marks = roomCodes.length
+      ? await OfflineChange.find({ userId, roomCode: { $in: roomCodes } })
+          .select("roomCode changedAt changedByName")
+          .lean()
+      : [];
+    const markByRoom = new Map(marks.map((m) => [m.roomCode, m]));
+
+    const documents = docs
+      .filter((d) => markByRoom.has(d.roomCode))
+      .map((d) => {
+        const mark = markByRoom.get(d.roomCode);
+        return {
+          id: String(d._id),
+          roomCode: d.roomCode,
+          changedAt: mark.changedAt,
+          changedByName: mark.changedByName || "",
+        };
+      });
+
+    res.json({ success: true, documents });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 // Create a new empty document owned by the logged-in user (optionally inside a folder)
 router.post("/", async (req, res) => {
   try {
@@ -220,13 +257,62 @@ router.get("/:id", checkId, async (req, res) => {
   }
 });
 
-// Save: html, title, folder and/or toolState. A field that is NOT sent is left untouched
+// The editor says the latest room content has reached this document: the "!" mark goes away.
+router.post("/:id/synced", checkId, async (req, res) => {
+  try {
+    const doc = await Document.findOne({ _id: req.params.id, owner: req.userId }).select("roomCode").lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    if (doc.roomCode) {
+      await OfflineChange.deleteMany({ roomCode: doc.roomCode, userId: String(req.userId) });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// A room code is 4-12 letters / digits (or null / "" to unlink the document from a room)
+function cleanRoomCode(value) {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || !/^[A-Z0-9]{4,12}$/.test(value)) {
+    const err = new Error("Invalid room code");
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+// Save: html, title, folder, toolState and/or roomCode. A field that is NOT sent is left untouched
 // (so renaming or moving a document can never wipe its content).
 router.put("/:id", checkId, async (req, res) => {
   try {
-    const { html, title, folder, toolState } = req.body;
+    const { html, title, folder, toolState, roomCode } = req.body;
+
+    // Only the room link changed: a small update that never touches the content or the version
+    if (
+      roomCode !== undefined &&
+      html === undefined &&
+      title === undefined &&
+      folder === undefined &&
+      !toolState
+    ) {
+      const code = cleanRoomCode(roomCode);
+      const result = await Document.updateOne(
+        { _id: req.params.id, owner: req.userId },
+        { $set: { roomCode: code } },
+        { timestamps: false }
+      );
+      if (!result.matchedCount) return res.status(404).json({ success: false, message: "Document not found" });
+      return res.json({ success: true, document: { _id: req.params.id, roomCode: code } });
+    }
+
     const doc = await Document.findById(req.params.id);
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    if (roomCode !== undefined && String(doc.owner) === String(req.userId)) {
+      doc.roomCode = cleanRoomCode(roomCode);
+    }
 
     if (typeof html === "string") {
       const clean = sanitizeHtml(html);
@@ -264,6 +350,7 @@ router.put("/:id", checkId, async (req, res) => {
         _id: doc._id,
         title: doc.title,
         folder: doc.folder,
+        roomCode: doc.roomCode,
         updatedAt: doc.updatedAt,
         toolState: doc.toolState,
         lastExportedAt: doc.lastExportedAt,

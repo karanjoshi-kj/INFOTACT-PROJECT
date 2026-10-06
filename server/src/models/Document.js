@@ -43,6 +43,10 @@ const documentSchema = new mongoose.Schema(
 
     html: { type: String, default: null },
 
+    // The live room this document is linked to (set by the editor). The server uses it to
+    // tell the owner "this document changed while you were offline".
+    roomCode: { type: String, default: null },
+
     lastExportedAt: { type: Date, default: null },
     exportCount: { type: Number, default: 0 },
 

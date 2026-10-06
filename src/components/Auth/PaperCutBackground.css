@@ -1,0 +1,26 @@
+/* Paper-cut layered background for the Login and Create Account pages.
+   It only paints the empty background around the panel (.auth-page::after sits
+   below .auth-frame, ignores the mouse and never touches the form or its layout).
+   Colours are the existing royal palette from AuthPage.css:
+   royal-950 5,11,38 / royal-900 10,22,80 / royal-800 20,41,121 /
+   royal-700 32,58,160 / royal-500 71,99,201 / royal-300 147,168,232 */
+.auth-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-position: left bottom, left top, right top;
+  background-size:
+    100% clamp(140px, 32vh, 320px),
+    min(46vw, 480px) min(46vw, 480px),
+    min(34vw, 340px) min(34vw, 340px);
+  background-image:
+    /* 1. Bottom: four stacked waves, each casting a soft shadow on the one behind it */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 360' preserveAspectRatio='none'><defs><filter id='s' x='-0.05' y='-0.3' width='1.1' height='1.6'><feGaussianBlur in='SourceAlpha' stdDeviation='7'/><feOffset dy='-6' result='b'/><feFlood flood-color='rgb(2,6,26)' flood-opacity='0.55'/><feComposite in2='b' operator='in'/><feMerge><feMergeNode/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><path filter='url(%23s)' fill='rgb(20,41,121)' fill-opacity='0.5' stroke='rgb(147,168,232)' stroke-opacity='0.16' vector-effect='non-scaling-stroke' d='M0 120 C240 40 480 40 720 110 S1200 190 1440 90 L1440 360 L0 360 Z'/><path filter='url(%23s)' fill='rgb(32,58,160)' fill-opacity='0.4' stroke='rgb(147,168,232)' stroke-opacity='0.14' vector-effect='non-scaling-stroke' d='M0 190 C200 120 460 140 700 200 S1180 260 1440 170 L1440 360 L0 360 Z'/><path filter='url(%23s)' fill='rgb(10,22,80)' fill-opacity='0.85' stroke='rgb(147,168,232)' stroke-opacity='0.12' vector-effect='non-scaling-stroke' d='M0 245 C260 190 520 215 760 255 S1210 305 1440 235 L1440 360 L0 360 Z'/><path filter='url(%23s)' fill='rgb(5,11,38)' fill-opacity='0.95' stroke='rgb(147,168,232)' stroke-opacity='0.1' vector-effect='non-scaling-stroke' d='M0 305 C300 265 560 290 800 315 S1220 345 1440 300 L1440 360 L0 360 Z'/></svg>"),
+    /* 2. Top-left corner: nested paper layers fanning out from the corner */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'><defs><filter id='s' x='-0.2' y='-0.2' width='1.5' height='1.5'><feGaussianBlur in='SourceAlpha' stdDeviation='6'/><feOffset dx='4' dy='6' result='b'/><feFlood flood-color='rgb(2,6,26)' flood-opacity='0.5'/><feComposite in2='b' operator='in'/><feMerge><feMergeNode/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><path filter='url(%23s)' fill='rgb(20,41,121)' fill-opacity='0.5' stroke='rgb(147,168,232)' stroke-opacity='0.16' vector-effect='non-scaling-stroke' d='M0 0 H400 C400 120 330 230 210 290 C120 335 40 380 0 400 Z'/><path filter='url(%23s)' fill='rgb(32,58,160)' fill-opacity='0.4' stroke='rgb(147,168,232)' stroke-opacity='0.16' vector-effect='non-scaling-stroke' d='M0 0 H300 C300 100 250 170 160 215 C90 250 30 290 0 310 Z'/><path filter='url(%23s)' fill='rgb(71,99,201)' fill-opacity='0.3' stroke='rgb(147,168,232)' stroke-opacity='0.18' vector-effect='non-scaling-stroke' d='M0 0 H200 C195 70 160 115 100 145 C55 168 20 190 0 210 Z'/><path filter='url(%23s)' fill='rgb(147,168,232)' fill-opacity='0.16' stroke='rgb(147,168,232)' stroke-opacity='0.2' vector-effect='non-scaling-stroke' d='M0 0 H110 C105 40 80 70 45 88 C25 98 10 106 0 115 Z'/></svg>"),
+    /* 3. Top-right corner: three smaller layered curves */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 300'><defs><filter id='s' x='-0.2' y='-0.2' width='1.5' height='1.5'><feGaussianBlur in='SourceAlpha' stdDeviation='5'/><feOffset dx='-4' dy='6' result='b'/><feFlood flood-color='rgb(2,6,26)' flood-opacity='0.5'/><feComposite in2='b' operator='in'/><feMerge><feMergeNode/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs><path filter='url(%23s)' fill='rgb(20,41,121)' fill-opacity='0.45' stroke='rgb(147,168,232)' stroke-opacity='0.16' vector-effect='non-scaling-stroke' d='M300 0 H60 C90 90 190 170 300 190 Z'/><path filter='url(%23s)' fill='rgb(32,58,160)' fill-opacity='0.35' stroke='rgb(147,168,232)' stroke-opacity='0.16' vector-effect='non-scaling-stroke' d='M300 0 H130 C150 60 220 110 300 120 Z'/><path filter='url(%23s)' fill='rgb(71,99,201)' fill-opacity='0.28' stroke='rgb(147,168,232)' stroke-opacity='0.18' vector-effect='non-scaling-stroke' d='M300 0 H200 C215 35 255 60 300 65 Z'/></svg>");
+}

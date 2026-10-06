@@ -13,7 +13,9 @@ const WS_URL = 'ws://localhost:1234' // same live-sync server the editor uses
 //   - On join / refresh / reconnect the title stored in the room is applied, so nobody keeps an old name.
 //   - Only approved people read or write the title (same rule as the document text).
 //   - Yjs keeps one value per key, so two people renaming at once end up with the same final title everywhere.
-export default function useSharedTitle({ enabled, docId, roomCode, role, access, getTitle, onRemoteTitle }) {
+//   - `onSynced` is called each time an approved person has received the room's latest state
+//     (the page uses it to clear the "changed while you were offline" mark).
+export default function useSharedTitle({ enabled, docId, roomCode, role, access, getTitle, onRemoteTitle, onSynced }) {
   const ymetaRef = useRef(null)
   const syncedRef = useRef(false) // true once the room's current state has arrived
   const pendingRef = useRef(null) // a rename made before the first sync (sent right after it)
@@ -26,6 +28,8 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
   getTitleRef.current = getTitle
   const onRemoteTitleRef = useRef(onRemoteTitle)
   onRemoteTitleRef.current = onRemoteTitle
+  const onSyncedRef = useRef(onSynced)
+  onSyncedRef.current = onSynced
 
   useEffect(() => {
     if (!enabled || !roomCode) return undefined
@@ -73,6 +77,9 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
       } else {
         applyShared()
       }
+
+      // The newest state of the room has arrived
+      if (onSyncedRef.current) onSyncedRef.current()
     }
 
     ymeta.observe(onMeta)
@@ -92,7 +99,10 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
 
   // Approved after joining: pick up the shared title right away
   useEffect(() => {
-    if (access === 'granted' && syncedRef.current && applyRef.current) applyRef.current()
+    if (access === 'granted' && syncedRef.current && applyRef.current) {
+      applyRef.current()
+      if (onSyncedRef.current) onSyncedRef.current()
+    }
   }, [access])
 
   // Call this when YOU rename the document
