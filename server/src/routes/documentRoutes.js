@@ -290,7 +290,7 @@ function cleanRoomCode(value) {
 // (so renaming or moving a document can never wipe its content).
 router.put("/:id", checkId, async (req, res) => {
   try {
-    const { html, title, folder, toolState } = req.body;
+    const { html, title, folder, toolState, roomCode } = req.body;
     const doc = await Document.findOne({
       _id: req.params.id,
       owner: req.userId,

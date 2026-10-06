@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import TitleBar from '../components/Layout/TitleBar.jsx'
 import Editor from '../components/Editor/Editor.jsx'
 import FileExplorer from '../components/Sidebar/FileExplorer.jsx'
-import { getUser, clearSession } from '../utils/auth.js'
+import { getUser, clearSession, getToken } from "../utils/auth.js";
 import {
   createDocument,
   getDocument,
@@ -570,11 +570,46 @@ function EditorPage() {
     return true
   }
 
-  const handleNewRoomCode = () => {
-    const code = generateRoomCode()
+  const handleNewRoomCode = async () => {
+   const code = generateRoomCode()
+
+   try {
+    const token = getToken()
+
+    const response = await fetch('http://localhost:5000/api/rooms', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        roomCode: code,
+        documentId: docIdRef.current,
+      }),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Could not create room')
+    }
+
+    // MongoDB room successfully created.
+    // Now start the Yjs room.
     applyRoom(code, 'host', true)
-    showToast(`New room ${code} is ready - share the code or link`, 'success')
+
+    showToast(
+      `New room ${code} is ready - share the code or link`,
+      'success'
+    )
+  } catch (error) {
+    console.error('Room creation failed:', error)
+    showToast(
+      error.message || 'Could not create room',
+      'error'
+    )
   }
+}
 
   // Leave the shared room and go back to your own private copy of the document
   const handleLeaveRoom = () => {

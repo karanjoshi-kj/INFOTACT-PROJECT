@@ -1,6 +1,8 @@
 const http = require("http");
 const WebSocket = require("ws");
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const Room = require("../models/Room");
 const { setupWSConnection, getYDoc } = require("y-websocket/bin/utils");
 const RoomApproval = require("../models/RoomApproval");
 const RoomState = require("../models/RoomState");
@@ -14,6 +16,105 @@ const FLAG_DELAY_MS = 500; // wait this long before saving "missed while offline
 
 // doc -> room state kept by the server (see newState)
 const roomStates = new WeakMap();
+async function authenticateWebSocket(req) {
+  try {
+    const url = new URL(req.url, "http://localhost");
+    const token = url.searchParams.get("token");
+
+    if (!token) {
+      return {
+        ok: false,
+        code: 1008,
+        message: "Authentication required",
+      };
+    }
+
+    const payload = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+    if (!payload.userId) {
+      return {
+        ok: false,
+        code: 1008,
+        message: "Invalid authentication token",
+      };
+    }
+
+    return {
+      ok: true,
+      userId: String(payload.userId),
+    };
+  } catch (error) {
+    console.error(
+      "WebSocket authentication failed:",
+      error.message
+    );
+
+    return {
+      ok: false,
+      code: 1008,
+      message: "Invalid or expired token",
+    };
+  }
+}
+
+
+async function authorizeRoom(roomCode, userId) {
+  try {
+    const room = await Room.findOne({ roomCode });
+
+    if (!room) {
+      return {
+        ok: false,
+        code: 1008,
+        message: "Room not found",
+      };
+    }
+
+    const isHost =
+      String(room.hostId) === String(userId);
+
+    const isApprovedMember =
+      room.members.some(
+        (member) =>
+          String(member.userId) === String(userId) &&
+          member.status === "approved"
+      );
+
+    if (!isHost && !isApprovedMember) {
+     console.log("WebSocket room access denied:", {
+      roomCode,
+      userId,
+      isHost,
+      isApprovedMember,
+    });
+
+  return {
+    ok: false,
+    code: 1008,
+    message:
+      "You are not an approved member of this room",
+  };
+}
+
+    return {
+      ok: true,
+      room,
+    };
+  } catch (error) {
+    console.error(
+      `Could not authorize room ${roomCode}:`,
+      error.message
+    );
+
+    return {
+      ok: false,
+      code: 1013,
+      message: "Unable to verify room access",
+    };
+  }
+}
 
 function newState(roomCode) {
   return {
@@ -352,10 +453,49 @@ function startYjsServer(port) {
   const server = http.createServer();
   const wss = new WebSocket.Server({ server });
 
-  wss.on("connection", (ws, req) => {
-    // Must be the same name y-websocket derives from the url
-    const docName = (req.url || "/").slice(1).split("?")[0];
-    const waiting = prepareRoom(docName);
+  wss.on("connection", async (ws, req) => {
+  try {
+    const docName =
+      (req.url || "/").slice(1).split("?")[0];
+
+    if (!docName.startsWith(ROOM_PREFIX)) {
+      ws.close(1008, "Invalid room");
+      return;
+    }
+
+    const roomCode =
+      docName.slice(ROOM_PREFIX.length);
+
+    // 1. Check JWT
+    const auth =
+      await authenticateWebSocket(req);
+
+    if (!auth.ok) {
+      ws.close(auth.code, auth.message);
+      return;
+    }
+
+    // 2. Check room membership
+    const authorization =
+      await authorizeRoom(
+        roomCode,
+        auth.userId
+      );
+
+    if (!authorization.ok) {
+      ws.close(
+        authorization.code,
+        authorization.message
+      );
+      return;
+    }
+
+    ws.userId = auth.userId;
+    ws.roomCode = roomCode;
+
+    // 3. Existing room preparation
+    const waiting =
+      prepareRoom(docName);
 
     if (!waiting) {
       setupWSConnection(ws, req);
@@ -363,23 +503,53 @@ function startYjsServer(port) {
       return;
     }
 
-    // First connection to this room since the server started: wait (briefly) until the saved
-    // approvals, colours and content are back in the room, so an approved collaborator is never
-    // asked again and an old copy can never replace the newest content.
-    // Anything the browser sends meanwhile is kept and handed over afterwards.
     const held = [];
-    const hold = (data, isBinary) => held.push([data, isBinary]);
+
+    const hold = (data, isBinary) => {
+      held.push([data, isBinary]);
+    };
+
     ws.on("message", hold);
 
-    waiting.then(() => {
-      ws.off("message", hold);
-      if (ws.readyState !== WebSocket.OPEN) return; // the browser left while we waited
+    await waiting;
 
-      setupWSConnection(ws, req);
-      saveOnClose(ws, docName);
-      held.forEach(([data, isBinary]) => ws.emit("message", data, isBinary));
+    if (
+      ws.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    ws.off("message", hold);
+
+    // 4. Start Yjs only after authentication
+    setupWSConnection(ws, req);
+
+    saveOnClose(ws, docName);
+
+    held.forEach(([data, isBinary]) => {
+      ws.emit(
+        "message",
+        data,
+        isBinary
+      );
     });
-  });
+
+  } catch (error) {
+    console.error(
+      "WebSocket connection error:",
+      error
+    );
+
+    if (
+      ws.readyState === WebSocket.OPEN
+    ) {
+      ws.close(
+        1011,
+        "Internal server error"
+      );
+    }
+  }
+});
 
   server.listen(port, () => {
     console.log(`Yjs WebSocket server running on port ${port}`);

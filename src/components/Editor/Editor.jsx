@@ -6,7 +6,7 @@ import { exportDocumentPdf } from '../../services/api.js'
 import './Editor.css'
 import { getToken } from '../../utils/auth.js'
 
-const WS_URL = 'ws://localhost:1234'
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:1234'
 
 // The host always gets this colour. Collaborators get one of the colours below
 // (one each - the room keeps them from repeating).
