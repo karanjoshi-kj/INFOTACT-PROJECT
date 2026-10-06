@@ -21,6 +21,7 @@ import './EditorPage.css'
 const SAVE_DELAY = 1000 // ms of no typing before we save (the "debounce")
 const RETRY_DELAY = 4000 // ms before retrying a failed save
 const RECENT_ROOMS_KEY = 'syncdoc-recent-rooms'
+const NO_PEERS = [] // stable empty list (a solo document has no collaborators)
 const HOST_COLOR = '#f59e0b' // same host colour as the editor and title bar
 const OFFLINE_POLL_MS = 8000 // how often the "changed while you were offline" marks are refreshed
 
@@ -276,7 +277,8 @@ function EditorPage() {
   const [theme, setTheme] = useState(getInitialTheme)
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen)
   const [loadedDocId, setLoadedDocId] = useState(null) // the document whose title is in `title`
-  const [peers, setPeers] = useState([]) // real people in the room (from the editor)
+  // People in the room, tagged with the document + room they belong to (see `scope` below)
+  const [presence, setPresence] = useState({ scope: '', list: [] })
   const [roomCode, setRoomCode] = useState('')
   const [roomCodeCopied, setRoomCodeCopied] = useState(false)
   const [roomLinkCopied, setRoomLinkCopied] = useState(false)
@@ -288,17 +290,41 @@ function EditorPage() {
   const navigate = useNavigate()
   const user = getUser()
 
+  const docIdRef = useRef(null) // the document that is currently loaded
   const [roomRole, setRoomRole] = useState('host') // 'host' | 'collab' - your role in the current room
-  const [roomAccess, setRoomAccess] = useState('granted') // 'granted' | 'pending' | 'denied'
+  const [accessState, setAccessState] = useState({ scope: '', value: 'granted' }) // access, tagged with its document + room
   const [collabDocs, setCollabDocs] = useState([]) // shown in "Collab Files" (loaded from the server)
   const [offlineDocIds, setOfflineDocIds] = useState([]) // documents changed while you were offline (from the server)
 
+  // Collaboration state belongs to ONE document + ONE room. Anything reported by an editor
+  // (people online, access) is stored with that scope, and is only used while the open
+  // document and room still match it. A late report from a previous document is ignored.
+  const scope = `${docId || ''}|${roomCode}`
+  const peers = presence.scope === scope ? presence.list : NO_PEERS
+  const roomAccess = accessState.scope === scope ? accessState.value : roomRole === 'host' ? 'granted' : 'pending'
+  const handlePresenceChange = (list) => setPresence({ scope, list })
+  const handleAccessChange = (value) => setAccessState({ scope, value })
+
   const collaboratorCount = Math.max(1, peers.length)
+
+  // The colour indicator and the "N collaborators online" status belong to ONE thing only:
+  // the document that is open right now, while it has an active room (hosted, joined, or shared).
+  // It is worked out from this document's own state, never from rooms used on other documents.
+  const collabActive =
+    loadState === 'ready' &&
+    !!docId &&
+    docId !== 'new' &&
+    loadedDocId === docId &&
+    docIdRef.current === docId &&
+    !!roomCode &&
+    roomAccess !== 'denied' &&
+    (roomRole === 'collab' ||
+      peers.length > 1 ||
+      collabDocs.some((e) => e.id === docId && e.room === roomCode))
 
   // Always holds the newest { html, text } from the editor.
   const latestContentRef = useRef({ html: '', text: '' })
   const titleRef = useRef('Untitled Document')
-  const docIdRef = useRef(null) // the document that is currently loaded
   const dirtyRef = useRef({ html: false, title: false, toolState: false }) // what still needs saving
   const toolStateRef = useRef(null) // latest tool state from the editor
   const debounceTimerRef = useRef(null)
@@ -496,7 +522,7 @@ function EditorPage() {
   const applyRoom = (code, role = 'host', collab = false) => {
     // The editor restarts for the new room, so hand it the newest text (not the text from first load)
     setInitialHtml(latestContentRef.current.html)
-    setPeers([])
+    setPresence({ scope: '', list: [] })
     setRoomRole(role)
     setRoomCode(code)
     writeRole(user, code, role)
@@ -670,7 +696,12 @@ function EditorPage() {
     setLoadState('loading')
     setSaveStatus('Loading...')
     setSaveProgress(0)
-    setPeers([]) // the people of the previous document are not in this one
+    // Nothing of the previous document's room may stay behind: the next document starts with no room,
+    // no people, no role and no access until its own room is known.
+    setPresence({ scope: '', list: [] })
+    setAccessState({ scope: '', value: 'granted' })
+    setRoomRole('host')
+    setRoomCode('')
 
     getDocument(docId)
       .then((data) => {
@@ -1155,6 +1186,7 @@ function EditorPage() {
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
           peers={peers}
+          collabActive={collabActive}
           roomCode={roomCode}
           role={roomRole}
           onJoinRoom={handleJoinRoom}
@@ -1162,7 +1194,18 @@ function EditorPage() {
         />
 
         <main className="editor-page-main">
-          <div className="editor-container">
+          <div className={`editor-container ${collabActive ? '' : 'collab-off'}`}>
+            {/* Solo document (no active room): hide every collaborator colour mark */}
+            <style>{`
+              .editor-container.collab-off .editor-content [data-author] {
+                box-shadow: none !important;
+                background-image: none !important;
+                padding-left: 0 !important;
+              }
+              .editor-container.collab-off .author-legend {
+                display: none !important;
+              }
+            `}</style>
             {loadState === 'ready' && (
               <Editor
                 key={`${docId}-${roomCode}`}
@@ -1176,8 +1219,8 @@ function EditorPage() {
                 onChange={handleContentChange}
                 onRemoteChange={handleRemoteChange}
                 onToolStateChange={handleToolStateChange}
-                onPresenceChange={setPeers}
-                onAccessChange={setRoomAccess}
+                onPresenceChange={handlePresenceChange}
+                onAccessChange={handleAccessChange}
                 onNotify={showToast}
               />
             )}
@@ -1215,10 +1258,14 @@ function EditorPage() {
             <span className="footer-user-name">
               Logged in as <b>{user?.name || 'User'}</b>
             </span>
-            <span className="footer-divider"></span>
-            <span className="footer-collaborators">
-              {collaboratorCount} collaborator{collaboratorCount === 1 ? '' : 's'} online
-            </span>
+            {collabActive && (
+              <>
+                <span className="footer-divider"></span>
+                <span className="footer-collaborators">
+                  {collaboratorCount} collaborator{collaboratorCount === 1 ? '' : 's'} online
+                </span>
+              </>
+            )}
           </div>
 
           <div className="footer-center">
