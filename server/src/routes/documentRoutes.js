@@ -1,9 +1,13 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const cheerio = require("cheerio");
 const Document = require("../models/Document");
 const Folder = require("../models/Folder");
+const OfflineChange = require("../models/OfflineChange");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
+const { generateDocumentPdf } = require("../utils/pdfExport");
+const deleteDocumentsWithCollaboration = require("../utils/deleteDocumentsWithCollaboration");
 
 const router = express.Router();
 
@@ -12,20 +16,100 @@ router.use(requireAuth);
 
 // ---------- helpers ----------
 
-// The editor only ever produces these tags. Anything else is removed, and ALL
-// attributes (onclick, style, href...) are dropped, so saved html can never carry a script.
-const ALLOWED_TAGS = new Set(["b", "strong", "i", "em", "u", "h1", "h2", "ul", "ol", "li", "div", "p", "br", "span"]);
+// Allowed tags produced by the editor
+const ALLOWED_TAGS = new Set([
+  "b", "strong", "i", "em", "u", "s", "strike", "del",
+  "h1", "h2", "h3", "ul", "ol", "li", "div", "p", "br", "span", "hr",
+  "table", "thead", "tbody", "tr", "th", "td",
+  "pre", "code", "img", "a"
+]);
 
-function sanitizeHtml(html) {
-  return String(html).replace(/<[^<>]*>|[<>]/g, (token) => {
-    const m = token.match(/^<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^<>]*>$/);
-    if (m && ALLOWED_TAGS.has(m[2].toLowerCase())) {
-      return `<${m[1]}${m[2].toLowerCase()}>`;
+function sanitizeHtml(rawHtml) {
+  if (!rawHtml || typeof rawHtml !== "string") return "";
+  const $ = cheerio.load(rawHtml, null, false);
+
+  $("*").each((_, el) => {
+    const tag = el.name ? el.name.toLowerCase() : "";
+    if (!ALLOWED_TAGS.has(tag)) {
+      $(el).remove();
+      return;
     }
-    if (token === "<") return "&lt;";
-    if (token === ">") return "&gt;";
-    return ""; // a disallowed tag
+
+    const attrs = el.attribs || {};
+    const safeAttrs = {};
+
+    // List numbering type (e.g. Roman numerals 'I', 'i', or '1', 'a', 'A')
+    if (attrs.type && tag === "ol") {
+      const t = attrs.type.trim();
+      if (/^[1aAiI]$/.test(t)) safeAttrs.type = t;
+    }
+
+    // Classes used by the editor
+    if (attrs.class) {
+      const classes = attrs.class.split(/\s+/).filter((c) =>
+        ["roman-list", "code-block", "sheet", "doc-table"].includes(c)
+      );
+      if (classes.length > 0) safeAttrs.class = classes.join(" ");
+    }
+
+    // Safe inline styles: text alignment, list styles, and authorship colors
+    if (attrs.style) {
+      const styleProps = [];
+      const declarations = attrs.style.split(";");
+      for (const decl of declarations) {
+        const [prop, val] = decl.split(":").map((s) => s && s.trim());
+        if (!prop || !val) continue;
+        const p = prop.toLowerCase();
+        if (p === "text-align" && ["left", "center", "right", "justify"].includes(val.toLowerCase())) {
+          styleProps.push(`text-align: ${val.toLowerCase()}`);
+        } else if (p === "list-style-type" && ["upper-roman", "lower-roman", "decimal", "disc", "circle", "square"].includes(val.toLowerCase())) {
+          styleProps.push(`list-style-type: ${val.toLowerCase()}`);
+        } else if (p === "--author-color" && /^#[0-9a-fA-F]{3,8}$/.test(val)) {
+          styleProps.push(`--author-color: ${val}`);
+        }
+      }
+      if (styleProps.length > 0) safeAttrs.style = styleProps.join("; ");
+    }
+
+    if (attrs.align && ["left", "center", "right", "justify"].includes(attrs.align.toLowerCase())) {
+      safeAttrs.align = attrs.align.toLowerCase();
+    }
+
+    if (tag === "img" && attrs.src) {
+      if (attrs.src.startsWith("data:image/") || /^https?:\/\//i.test(attrs.src)) {
+        safeAttrs.src = attrs.src;
+        if (attrs.alt) safeAttrs.alt = attrs.alt.slice(0, 200);
+      }
+    }
+
+    if (tag === "a" && attrs.href) {
+      if (/^https?:\/\//i.test(attrs.href) || /^mailto:/i.test(attrs.href)) {
+        safeAttrs.href = attrs.href;
+      }
+    }
+
+    if (attrs["data-lang"] && tag === "pre") {
+      safeAttrs["data-lang"] = attrs["data-lang"].slice(0, 30);
+    }
+
+    if (attrs["data-formula"] && tag === "td") {
+      safeAttrs["data-formula"] = attrs["data-formula"].slice(0, 500);
+    }
+
+    if (attrs["data-author"]) {
+      safeAttrs["data-author"] = String(attrs["data-author"]).slice(0, 100);
+    }
+    if (attrs["data-author-name"]) {
+      safeAttrs["data-author-name"] = String(attrs["data-author-name"]).slice(0, 100);
+    }
+    if (attrs.title) {
+      safeAttrs.title = String(attrs.title).slice(0, 100);
+    }
+
+    el.attribs = safeAttrs;
   });
+
+  return $.html();
 }
 
 // Editor HTML -> the **bold** / *italic* / __underline__ text that textToAST expects
@@ -107,6 +191,42 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Which of the logged-in user's documents were changed by someone else while the user was
+// offline. The editor shows a small "!" next to each of them in the file list.
+// (Must stay above "/:id" so "offline-changes" is not read as a document id.)
+router.get("/offline-changes", async (req, res) => {
+  try {
+    const userId = String(req.userId);
+    const docs = await Document.find({ owner: req.userId, roomCode: { $ne: null } })
+      .select("_id roomCode")
+      .lean();
+
+    const roomCodes = [...new Set(docs.map((d) => d.roomCode))];
+    const marks = roomCodes.length
+      ? await OfflineChange.find({ userId, roomCode: { $in: roomCodes } })
+          .select("roomCode changedAt changedByName")
+          .lean()
+      : [];
+    const markByRoom = new Map(marks.map((m) => [m.roomCode, m]));
+
+    const documents = docs
+      .filter((d) => markByRoom.has(d.roomCode))
+      .map((d) => {
+        const mark = markByRoom.get(d.roomCode);
+        return {
+          id: String(d._id),
+          roomCode: d.roomCode,
+          changedAt: mark.changedAt,
+          changedByName: mark.changedByName || "",
+        };
+      });
+
+    res.json({ success: true, documents });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 // Create a new empty document owned by the logged-in user (optionally inside a folder)
 router.post("/", async (req, res) => {
   try {
@@ -122,23 +242,65 @@ router.post("/", async (req, res) => {
 // Load: the document + ready-to-use html for the editor
 router.get("/:id", checkId, async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findOne({
+     _id: req.params.id,
+     owner: req.userId,
+    });
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
 
     const html = doc.html !== null && doc.html !== undefined ? doc.html : astToHtml(doc.children);
-    res.json({ success: true, document: doc, html });
+    res.json({
+      success: true,
+      document: doc,
+      html,
+      toolState: doc.toolState || null,
+      lastExportedAt: doc.lastExportedAt || null,
+    });
   } catch (err) {
     fail(res, err);
   }
 });
 
-// Save: html, title and/or folder. A field that is NOT sent is left untouched
+// The editor says the latest room content has reached this document: the "!" mark goes away.
+router.post("/:id/synced", checkId, async (req, res) => {
+  try {
+    const doc = await Document.findOne({ _id: req.params.id, owner: req.userId }).select("roomCode").lean();
+    if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    if (doc.roomCode) {
+      await OfflineChange.deleteMany({ roomCode: doc.roomCode, userId: String(req.userId) });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// A room code is 4-12 letters / digits (or null / "" to unlink the document from a room)
+function cleanRoomCode(value) {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || !/^[A-Z0-9]{4,12}$/.test(value)) {
+    const err = new Error("Invalid room code");
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+// Save: html, title, folder, toolState and/or roomCode. A field that is NOT sent is left untouched
 // (so renaming or moving a document can never wipe its content).
 router.put("/:id", checkId, async (req, res) => {
   try {
-    const { html, title, folder } = req.body;
-    const doc = await Document.findById(req.params.id);
+    const { html, title, folder, toolState, roomCode } = req.body;
+    const doc = await Document.findOne({
+      _id: req.params.id,
+      owner: req.userId,
+    });
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    if (roomCode !== undefined && String(doc.owner) === String(req.userId)) {
+      doc.roomCode = cleanRoomCode(roomCode);
+    }
 
     if (typeof html === "string") {
       const clean = sanitizeHtml(html);
@@ -155,6 +317,11 @@ router.put("/:id", checkId, async (req, res) => {
 
     if (typeof title === "string" && title.trim()) doc.title = title.trim();
 
+    if (toolState && typeof toolState === "object") {
+      doc.toolState = { ...(doc.toolState || {}), ...toolState };
+      doc.markModified("toolState");
+    }
+
     // Moving a document between folders: only its owner may do that
     if (folder !== undefined) {
       if (String(doc.owner) !== String(req.userId)) {
@@ -167,22 +334,89 @@ router.put("/:id", checkId, async (req, res) => {
     res.json({
       success: true,
       savedAt: doc.updatedAt,
-      document: { _id: doc._id, title: doc.title, folder: doc.folder, updatedAt: doc.updatedAt },
+      document: {
+        _id: doc._id,
+        title: doc.title,
+        folder: doc.folder,
+        roomCode: doc.roomCode,
+        updatedAt: doc.updatedAt,
+        toolState: doc.toolState,
+        lastExportedAt: doc.lastExportedAt,
+      },
     });
   } catch (err) {
     fail(res, err);
   }
 });
 
+// Real PDF Export (GET or POST):
+// Persists the export timestamp & counter in MongoDB and streams the generated PDF back.
+// POST optionally accepts the latest { html, title } to ensure the newest document state is saved before export.
+async function handleExportPdf(req, res) {
+  try {
+    const doc = await Document.findOne({
+      _id: req.params.id,
+      owner: req.userId,
+    });
+    if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+
+    // If client supplied unsaved title or html in POST, save it first
+    if (req.method === "POST" && req.body) {
+      const { html, title, toolState } = req.body;
+      if (typeof html === "string") {
+        const clean = sanitizeHtml(html);
+        doc.html = clean;
+        const tree = textToAST(htmlToMarkedText(clean));
+        doc.children = tree.children.map((block, index) => ({
+          ...block,
+          position: index,
+          parentId: null,
+        }));
+      }
+      if (typeof title === "string" && title.trim()) {
+        doc.title = title.trim();
+      }
+      if (toolState && typeof toolState === "object") {
+        doc.toolState = { ...(doc.toolState || {}), ...toolState };
+        doc.markModified("toolState");
+      }
+    }
+
+    // Update document export tracking state in MongoDB
+    doc.lastExportedAt = new Date();
+    doc.exportCount = (doc.exportCount || 0) + 1;
+    await doc.save();
+
+    const contentHtml = doc.html !== null && doc.html !== undefined ? doc.html : astToHtml(doc.children);
+    const pdfBuffer = await generateDocumentPdf({
+      title: doc.title,
+      html: contentHtml,
+    });
+
+    const safeFilename = encodeURIComponent((doc.title || "document").replace(/[/\\?%*:|"<>]/g, "_"));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.pdf"; filename*=UTF-8''${safeFilename}.pdf`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-SyncDoc-Exported-At", doc.lastExportedAt.toISOString());
+    res.setHeader("X-SyncDoc-Export-Count", String(doc.exportCount));
+    res.send(pdfBuffer);
+  } catch (err) {
+    fail(res, err);
+  }
+}
+
+router.get("/:id/export/pdf", checkId, handleExportPdf);
+router.post("/:id/export/pdf", checkId, handleExportPdf);
+
 // Delete a document (owner only)
 router.delete("/:id", checkId, async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id).select("owner");
+    const doc = await Document.findById(req.params.id).select("owner roomCode");
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
     if (String(doc.owner) !== String(req.userId)) {
       return res.status(403).json({ success: false, message: "Only the owner can delete this document" });
     }
-    await Document.deleteOne({ _id: doc._id });
+    await deleteDocumentsWithCollaboration([doc]);
     res.json({ success: true, deletedId: String(doc._id) });
   } catch (err) {
     fail(res, err);

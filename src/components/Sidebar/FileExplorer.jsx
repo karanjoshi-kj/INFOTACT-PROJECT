@@ -13,6 +13,23 @@ import './FileExplorer.css'
 
 const EXPANDED_KEY = 'syncdoc-expanded-folders'
 
+// The small "!" shown beside a document that was changed while you were offline
+const OFFLINE_FLAG_STYLE = {
+  flexShrink: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 16,
+  height: 16,
+  marginLeft: 4,
+  borderRadius: '50%',
+  background: '#ef4444',
+  color: '#fff',
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1,
+}
+
 // ---------- icons ----------
 const Svg = ({ children, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -148,6 +165,7 @@ function NameInput({ initial = '', kind, depth, onSubmit, onCancel }) {
 // ---------- the explorer ----------
 function FileExplorer({
   activeDocId, // the document open in the editor
+  offlineDocIds = [], // ids of documents changed while you were offline (shown with a "!")
   titleInfo, // { id, title } of the open document, keeps the list in sync when you rename it in the title bar
   onOpenDocument, // (id) => open that document in the editor
   onDocumentRenamed, // (id, title) => a file was renamed from the explorer
@@ -165,6 +183,8 @@ function FileExplorer({
   const [renaming, setRenaming] = useState(null) // { kind, id }
   const [menu, setMenu] = useState(null) // { x, y, target: {kind,id} | null }
   const [dropTarget, setDropTarget] = useState(null) // folder id | 'root'
+
+  const offlineSet = useMemo(() => new Set(offlineDocIds), [offlineDocIds])
 
   const dragRef = useRef(null)
   const docsRef = useRef(docs)
@@ -614,6 +634,11 @@ function FileExplorer({
           <span className="fx-label" title={d.title}>
             {d.title}
           </span>
+          {offlineSet.has(d._id) && (
+            <span style={OFFLINE_FLAG_STYLE} title="Changed while you were offline" aria-label="Changed while you were offline">
+              !
+            </span>
+          )}
           <span className="fx-actions">
             <button
               type="button"

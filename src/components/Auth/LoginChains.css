@@ -1,0 +1,55 @@
+/* Login page only (everything is scoped to .login-route, so /signup is not affected).
+
+   1. The panel is centred horizontally and vertically (the shared stylesheet pushes it
+      to the right on desktop; this puts it back in the middle).
+   2. On desktop the panel is a little wider (same height, so nothing inside is squeezed).
+   3. Two decorative chains hang from the top of the page down to the upper corners of the
+      panel, so the panel looks suspended. They are drawn on .auth-frame::before / ::after,
+      are pure decoration and ignore the mouse (pointer-events: none).
+
+   Chain colours use the existing royal palette:
+   royal-900 10,22,80 / royal-700 32,58,160 / royal-500 71,99,201 / royal-300 147,168,232 */
+
+/* ===== 1. Centre the panel ===== */
+.login-route .auth-page {
+  justify-content: center;
+  align-items: center;
+  padding-right: 20px;
+}
+
+/* ===== 2. Slightly wider, rectangular panel (desktop only; tablet / mobile keep their own sizes) ===== */
+@media (min-width: 901px) {
+  .login-route .auth-frame {
+    max-width: 900px;
+  }
+}
+
+/* ===== 3. Hanging chains ===== */
+.login-route .auth-frame::before,
+.login-route .auth-frame::after {
+  content: '';
+  position: absolute;
+  z-index: 30;
+  width: 20px;
+  height: 100vh; /* long enough to reach above the top of the page; the page clips the rest */
+  bottom: calc(100% - 14px); /* the lower end sits 14px inside the panel's top edge (the eyelet) */
+  pointer-events: none;
+  background-repeat: no-repeat, repeat-y;
+  background-position: center bottom, center top;
+  background-size: 20px 20px, 16px 44px;
+  filter: drop-shadow(2px 3px 3px rgba(2, 6, 26, 0.55));
+  background-image:
+    /* eyelet (the ring the chain is fixed to on the panel) */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='rgb(147,168,232)'/><stop offset='1' stop-color='rgb(32,58,160)'/></linearGradient></defs><circle cx='10' cy='10' r='7.5' fill='rgb(10,22,80)' stroke='url(%23g)' stroke-width='3'/><circle cx='10' cy='10' r='2.4' fill='rgb(147,168,232)'/></svg>"),
+    /* chain: one face-on link and one edge-on link, repeated downwards */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 44'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='rgb(147,168,232)'/><stop offset='0.5' stop-color='rgb(71,99,201)'/><stop offset='1' stop-color='rgb(32,58,160)'/></linearGradient></defs><rect x='2.5' y='2' width='11' height='28' rx='5.5' fill='none' stroke='url(%23g)' stroke-width='3'/><rect x='6' y='22' width='4' height='22' rx='2' fill='url(%23g)'/><rect x='6' y='0' width='4' height='6' fill='url(%23g)'/></svg>");
+}
+
+/* chain positions: near the upper-left and upper-right corners of the panel */
+.login-route .auth-frame::before {
+  left: calc(clamp(76px, 10%, 110px) - 10px);
+}
+
+.login-route .auth-frame::after {
+  right: calc(clamp(76px, 10%, 110px) - 10px);
+}
