@@ -111,6 +111,10 @@ export function requestRoomMembership(roomCode) {
   return request('/rooms/join', { method: 'POST', body: { roomCode } })
 }
 
+export function createRoom(roomCode, documentId) {
+  return request('/rooms', { method: 'POST', body: { roomCode, documentId } })
+}
+
 export function listRoomJoinRequests(roomCode) {
   return request(`/rooms/${encodeURIComponent(roomCode)}/requests`)
 }

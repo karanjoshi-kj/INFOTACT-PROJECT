@@ -103,25 +103,29 @@ router.post("/join", async (req, res) => {
     const existingMember = room.members.find(
       (member) => String(member.userId) === userId
     );
+    const role = String(room.hostId) === String(userId) ? "host" : "collab";
 
     if (existingMember) {
       return res.status(200).json({
         success: true,
         message: "User already has a room membership",
         status: existingMember.status,
+        role,
       });
     }
 
     room.members.push({
       userId,
-      status: "pending",
+      status: role === "host" ? "approved" : "pending",
     });
 
     await room.save();
 
     res.status(200).json({
       success: true,
-      message: "Join request sent successfully",
+      message: role === "host" ? "Room membership confirmed" : "Join request sent successfully",
+      status: role === "host" ? "approved" : "pending",
+      role,
       room,
     });
   } catch (error) {

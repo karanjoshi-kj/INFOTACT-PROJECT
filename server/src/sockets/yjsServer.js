@@ -3,7 +3,7 @@ const WebSocket = require("ws");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const Room = require("../models/Room");
-const { setupWSConnection, getYDoc } = require("y-websocket/bin/utils");
+const { setupWSConnection, getYDoc, docs } = require("y-websocket/bin/utils");
 const RoomApproval = require("../models/RoomApproval");
 const RoomState = require("../models/RoomState");
 const OfflineChange = require("../models/OfflineChange");
@@ -14,6 +14,7 @@ const RESTORE_TIMEOUT_MS = 3000;
 const SNAPSHOT_DELAY_MS = 1500; // wait this long after the last edit before saving the room content
 const FLAG_DELAY_MS = 500; // wait this long before saving "missed while offline" marks
 const ACCESS_DENIED_CLOSE_CODE = 4403;
+const ROOM_NOT_FOUND_CLOSE_CODE = 4404;
 
 // doc -> room state kept by the server (see newState)
 const roomStates = new WeakMap();
@@ -31,6 +32,38 @@ function revokeRoomMember(roomCode, userId) {
       client.close(ACCESS_DENIED_CLOSE_CODE, "Room access denied by host");
     }
   });
+}
+
+async function closeRoom(roomCode) {
+  const docName = `${ROOM_PREFIX}${roomCode}`;
+  const doc = docs.get(docName);
+  const state = doc && roomStates.get(doc);
+
+  if (state) {
+    state.deleted = true;
+    state.snapDirty = false;
+    state.pendingFlags.clear();
+    clearTimeout(state.snapTimer);
+    clearTimeout(state.flagTimer);
+    state.snapTimer = null;
+    state.flagTimer = null;
+  }
+
+  if (activeWss) {
+    activeWss.clients.forEach((client) => {
+      if (
+        String(client.roomCode) === String(roomCode) &&
+        client.readyState === WebSocket.OPEN
+      ) {
+        client.close(ROOM_NOT_FOUND_CLOSE_CODE, "Room no longer exists");
+      }
+    });
+  }
+
+  docs.delete(docName);
+  if (state) await Promise.allSettled([...state.pendingWrites]);
+  if (state) roomStates.delete(doc);
+  if (doc) doc.destroy();
 }
 
 async function authenticateWebSocket(req) {
@@ -84,7 +117,7 @@ async function authorizeRoom(roomCode, userId) {
     if (!room) {
       return {
         ok: false,
-        code: 1008,
+        code: ROOM_NOT_FOUND_CLOSE_CODE,
         message: "Room not found",
       };
     }
@@ -137,6 +170,8 @@ async function authorizeRoom(roomCode, userId) {
 function newState(roomCode) {
   return {
     roomCode,
+    deleted: false,
+    pendingWrites: new Set(),
     restored: false, // the saved approvals / colours / content were read from the database
     loading: null, // Promise while they are being read
     lastHtml: null, // the room content the last time we looked (null = not known yet)
@@ -146,6 +181,16 @@ function newState(roomCode) {
     snapTimer: null,
     snapDirty: false,
   };
+}
+
+function trackRoomWrite(state, operation) {
+  const pending = Promise.resolve(operation);
+  state.pendingWrites.add(pending);
+  pending.then(
+    () => state.pendingWrites.delete(pending),
+    () => state.pendingWrites.delete(pending)
+  );
+  return pending;
 }
 
 const isHexColor = (value) => typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
@@ -258,6 +303,7 @@ function watchApprovals(doc, state) {
   const colors = doc.getMap("colors");
 
   approvals.observe((event, transaction) => {
+    if (state.deleted) return;
     if (transaction.origin === RESTORE_ORIGIN) return;
 
     event.changes.keys.forEach((change, userId) => {
@@ -269,17 +315,17 @@ function watchApprovals(doc, state) {
         const color = colors.get(userId);
         if (isHexColor(color)) fields.color = color;
 
-        RoomApproval.updateOne(
+        trackRoomWrite(state, RoomApproval.updateOne(
           { roomCode, userId },
           { $set: fields, $setOnInsert: { approvedAt: new Date() } },
           { upsert: true }
-        ).catch((err) => console.error(`Could not save approval for room ${roomCode}:`, err.message));
+        )).catch((err) => console.error(`Could not save approval for room ${roomCode}:`, err.message));
       } else {
         // removed, or turned into a "denied" decision
-        RoomApproval.deleteOne({ roomCode, userId }).catch((err) =>
+        trackRoomWrite(state, RoomApproval.deleteOne({ roomCode, userId })).catch((err) =>
           console.error(`Could not remove approval for room ${roomCode}:`, err.message)
         );
-        OfflineChange.deleteOne({ roomCode, userId }).catch((err) =>
+        trackRoomWrite(state, OfflineChange.deleteOne({ roomCode, userId })).catch((err) =>
           console.error(`Could not clear offline mark for room ${roomCode}:`, err.message)
         );
       }
@@ -294,6 +340,7 @@ function watchColors(doc, state) {
   const colors = doc.getMap("colors");
 
   colors.observe((event, transaction) => {
+    if (state.deleted) return;
     if (transaction.origin === RESTORE_ORIGIN) return;
     if (!state.restored) return; // never replace the saved colours with guesses made before they were read
 
@@ -302,7 +349,7 @@ function watchColors(doc, state) {
       const record = approvals.get(userId);
       if (!isHexColor(color) || !record || record.status !== "approved") return;
 
-      RoomApproval.updateOne({ roomCode, userId }, { $set: { color } }).catch((err) =>
+      trackRoomWrite(state, RoomApproval.updateOne({ roomCode, userId }, { $set: { color } })).catch((err) =>
         console.error(`Could not save colour for room ${roomCode}:`, err.message)
       );
     });
@@ -314,12 +361,12 @@ function watchHost(doc, state) {
   const { roomCode } = state;
 
   doc.awareness.on("change", () => {
-    if (state.hostId || !state.restored) return;
+    if (state.deleted || state.hostId || !state.restored) return;
     doc.awareness.getStates().forEach((s) => {
       if (state.hostId) return;
       if (s && s.user && s.user.role === "host" && s.user.id !== undefined && s.user.id !== null) {
         state.hostId = String(s.user.id);
-        RoomState.updateOne({ roomCode }, { $set: { hostId: state.hostId } }, { upsert: true }).catch((err) =>
+        trackRoomWrite(state, RoomState.updateOne({ roomCode }, { $set: { hostId: state.hostId } }, { upsert: true })).catch((err) =>
           console.error(`Could not save host for room ${roomCode}:`, err.message)
         );
       }
@@ -330,12 +377,12 @@ function watchHost(doc, state) {
 async function flushSnapshot(doc, state) {
   clearTimeout(state.snapTimer);
   state.snapTimer = null;
-  if (!state.snapDirty || !state.restored) return;
+  if (state.deleted || !state.snapDirty || !state.restored) return;
   state.snapDirty = false;
 
   try {
     const html = doc.getText("content").toString();
-    await RoomState.updateOne({ roomCode: state.roomCode }, { $set: { html } }, { upsert: true });
+    await trackRoomWrite(state, RoomState.updateOne({ roomCode: state.roomCode }, { $set: { html } }, { upsert: true }));
   } catch (err) {
     state.snapDirty = true;
     console.error(`Could not save content of room ${state.roomCode}:`, err.message);
@@ -343,6 +390,7 @@ async function flushSnapshot(doc, state) {
 }
 
 function scheduleSnapshot(doc, state) {
+  if (state.deleted) return;
   state.snapDirty = true;
   if (state.snapTimer) return;
   state.snapTimer = setTimeout(() => flushSnapshot(doc, state), SNAPSHOT_DELAY_MS);
@@ -352,7 +400,7 @@ function scheduleSnapshot(doc, state) {
 async function flushFlags(doc, state) {
   clearTimeout(state.flagTimer);
   state.flagTimer = null;
-  if (state.pendingFlags.size === 0) return;
+  if (state.deleted || state.pendingFlags.size === 0) return;
 
   // Someone who is back online by now already received the newest content: no mark for them
   const online = onlineUserIds(doc);
@@ -361,7 +409,7 @@ async function flushFlags(doc, state) {
   if (entries.length === 0) return;
 
   try {
-    await OfflineChange.bulkWrite(
+    await trackRoomWrite(state, OfflineChange.bulkWrite(
       entries.map(([userId, info]) => ({
         updateOne: {
           filter: { roomCode: state.roomCode, userId },
@@ -375,7 +423,7 @@ async function flushFlags(doc, state) {
           upsert: true,
         },
       }))
-    );
+    ));
   } catch (err) {
     console.error(`Could not save offline marks for room ${state.roomCode}:`, err.message);
     entries.forEach(([userId, info]) => {
@@ -390,6 +438,7 @@ function watchContent(doc, state) {
   const ytext = doc.getText("content");
 
   ytext.observe((event, transaction) => {
+    if (state.deleted) return;
     if (transaction.origin === RESTORE_ORIGIN) return;
 
     const html = ytext.toString();
@@ -455,9 +504,8 @@ function prepareRoom(docName) {
 }
 
 // When a connection closes, save what is still waiting (the last edit, the offline marks)
-function saveOnClose(ws, docName) {
+function saveOnClose(ws, docName, doc) {
   if (!docName.startsWith(ROOM_PREFIX)) return;
-  const doc = getYDoc(docName);
   const state = roomStates.get(doc);
   if (!state) return;
 
@@ -496,7 +544,7 @@ function startYjsServer(port) {
       }
 
       setupWSConnection(ws, req);
-      saveOnClose(ws, docName);
+      saveOnClose(ws, docName, getYDoc(docName));
 
       // setupWSConnection must install its listener before replaying the messages
       // received while authentication / room restoration was in progress.
@@ -523,6 +571,9 @@ function startYjsServer(port) {
 
       const roomCode =
         docName.slice(ROOM_PREFIX.length);
+      // Mark the socket early so deletion can also close connections still
+      // waiting on JWT/MongoDB checks.
+      ws.roomCode = roomCode;
 
       // 1. Check JWT
       const auth =
@@ -550,8 +601,12 @@ function startYjsServer(port) {
         return;
       }
 
+      if (ws.readyState !== WebSocket.OPEN) {
+        discardHeld();
+        return;
+      }
+
       ws.userId = auth.userId;
-      ws.roomCode = roomCode;
 
       // 3. Existing room preparation
       const waiting = prepareRoom(docName);
@@ -561,6 +616,15 @@ function startYjsServer(port) {
         ws.readyState !== WebSocket.OPEN
       ) {
         discardHeld();
+        return;
+      }
+
+      // Recheck after restore: the Room could have been deleted while this
+      // connection was waiting for its saved Yjs state to load.
+      const latestAuthorization = await authorizeRoom(roomCode, auth.userId);
+      if (!latestAuthorization.ok) {
+        discardHeld();
+        ws.close(latestAuthorization.code, latestAuthorization.message);
         return;
       }
 
@@ -590,5 +654,6 @@ function startYjsServer(port) {
 }
 
 startYjsServer.revokeRoomMember = revokeRoomMember;
+startYjsServer.closeRoom = closeRoom;
 
 module.exports = startYjsServer;

@@ -7,6 +7,7 @@ const OfflineChange = require("../models/OfflineChange");
 const textToAST = require("../textToAST");
 const requireAuth = require("../middleware/auth");
 const { generateDocumentPdf } = require("../utils/pdfExport");
+const deleteDocumentsWithCollaboration = require("../utils/deleteDocumentsWithCollaboration");
 
 const router = express.Router();
 
@@ -410,12 +411,12 @@ router.post("/:id/export/pdf", checkId, handleExportPdf);
 // Delete a document (owner only)
 router.delete("/:id", checkId, async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id).select("owner");
+    const doc = await Document.findById(req.params.id).select("owner roomCode");
     if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
     if (String(doc.owner) !== String(req.userId)) {
       return res.status(403).json({ success: false, message: "Only the owner can delete this document" });
     }
-    await Document.deleteOne({ _id: doc._id });
+    await deleteDocumentsWithCollaboration([doc]);
     res.json({ success: true, deletedId: String(doc._id) });
   } catch (err) {
     fail(res, err);

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import TitleBar from '../components/Layout/TitleBar.jsx'
 import Editor from '../components/Editor/Editor.jsx'
 import FileExplorer from '../components/Sidebar/FileExplorer.jsx'
-import { getUser, clearSession, getToken } from "../utils/auth.js";
+import { getUser, clearSession } from "../utils/auth.js";
 import {
   createDocument,
   getDocument,
@@ -13,6 +13,7 @@ import {
   ackDocumentSynced,
   listCollabDocuments,
   listRoomJoinRequests,
+  createRoom,
   markDocumentCollab,
   requestRoomMembership,
   unmarkDocumentCollab,
@@ -281,7 +282,10 @@ function EditorPage() {
   const [loadedDocId, setLoadedDocId] = useState(null) // the document whose title is in `title`
   // People in the room, tagged with the document + room they belong to (see `scope` below)
   const [presence, setPresence] = useState({ scope: '', list: [] })
-  const [roomCode, setRoomCode] = useState('')
+  // A room code only belongs to the document whose room was confirmed by REST.
+  // Route changes must not briefly pass the previous document's code to Editor.
+  const [roomBinding, setRoomBinding] = useState({ documentId: null, code: '' })
+  const roomCode = roomBinding.documentId === docId ? roomBinding.code : ''
   const [roomCodeCopied, setRoomCodeCopied] = useState(false)
   const [roomLinkCopied, setRoomLinkCopied] = useState(false)
   const [recentRooms, setRecentRooms] = useState(readRecentRooms)
@@ -294,6 +298,12 @@ function EditorPage() {
   const user = getUser()
 
   const docIdRef = useRef(null) // the document that is currently loaded
+  const currentDocumentReady =
+    loadState === 'ready' &&
+    !!docId &&
+    loadedDocId === docId &&
+    docIdRef.current === docId
+  const editorRoomCode = currentDocumentReady ? roomCode : ''
   const [roomRole, setRoomRole] = useState('host') // 'host' | 'collab' - your role in the current room
   const [accessState, setAccessState] = useState({ scope: '', value: 'granted' }) // access, tagged with its document + room
   const [collabDocs, setCollabDocs] = useState([]) // shown in "Collab Files" (loaded from the server)
@@ -307,7 +317,22 @@ function EditorPage() {
   const peers = presence.scope === scope ? presence.list : NO_PEERS
   const roomAccess = accessState.scope === scope ? accessState.value : roomRole === 'host' ? 'granted' : 'pending'
   const handlePresenceChange = (list) => setPresence({ scope, list })
-  const handleAccessChange = (value) => setAccessState({ scope, value })
+  const handleAccessChange = (value) => {
+    setAccessState({ scope, value })
+    if (value !== 'closed' || !docId) return
+
+    // The backend closed this connection because the real Room was deleted.
+    // Unbind it so no further room-specific requests can be made.
+    setRoomBinding((current) => current.documentId === docId ? { documentId: docId, code: '' } : current)
+    setRoomRole('host')
+    try {
+      localStorage.removeItem(roomKey(docId))
+    } catch {
+      // ignore storage errors
+    }
+    removeCollab(docId)
+    saveDocument(docId, { roomCode: null }).catch(() => {})
+  }
 
   const collaboratorCount = Math.max(1, peers.length)
 
@@ -315,13 +340,11 @@ function EditorPage() {
   // the document that is open right now, while it has an active room (hosted, joined, or shared).
   // It is worked out from this document's own state, never from rooms used on other documents.
   const collabActive =
-    loadState === 'ready' &&
-    !!docId &&
+    currentDocumentReady &&
     docId !== 'new' &&
-    loadedDocId === docId &&
-    docIdRef.current === docId &&
     !!roomCode &&
     roomAccess !== 'denied' &&
+    roomAccess !== 'closed' &&
     (roomRole === 'collab' ||
       peers.length > 1 ||
       collabDocs.some((e) => e.id === docId && e.room === roomCode))
@@ -383,7 +406,7 @@ function EditorPage() {
 
   // Rejected WebSocket clients cannot publish awareness, so read pending requests from MongoDB.
   useEffect(() => {
-    if (loadState !== 'ready' || roomRole !== 'host' || !roomCode) {
+    if (!currentDocumentReady || roomRole !== 'host' || !roomCode) {
       setRoomJoinRequests([])
       return undefined
     }
@@ -404,7 +427,7 @@ function EditorPage() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [loadState, roomRole, roomCode, goToLogin])
+  }, [currentDocumentReady, loadedDocId, docId, roomRole, roomCode, goToLogin])
 
   // ---------------------------------------------------------------
   // OFFLINE CHANGE MARKS ("!" beside a document changed while you were offline)
@@ -479,13 +502,13 @@ function EditorPage() {
 
   // A document becomes a collab file when you join a room, or when someone joins yours
   useEffect(() => {
-    if (loadState !== 'ready' || !roomCode) return
+    if (!currentDocumentReady || !roomCode) return
     if (roomRole === 'collab' && roomAccess === 'denied') {
       removeCollab(docIdRef.current) // the host refused you: this is not a collaboration
       return
     }
     if (roomRole === 'collab' || peers.length > 1) markCollab(roomRole, roomCode)
-  }, [loadState, roomCode, roomRole, roomAccess, peers.length, markCollab, removeCollab])
+  }, [currentDocumentReady, loadedDocId, docId, roomCode, roomRole, roomAccess, peers.length, markCollab, removeCollab])
 
   // Keep the title in the Collab Files list current
   useEffect(() => {
@@ -553,22 +576,23 @@ function EditorPage() {
     setInitialHtml(latestContentRef.current.html)
     setPresence({ scope: '', list: [] })
     setRoomRole(role)
-    setRoomCode(code)
-    writeRole(user, code, role)
+    setRoomBinding({ documentId: docIdRef.current, code })
+    if (code) writeRole(user, code, role)
     if (role === 'host' && !collab) removeCollab(docIdRef.current) // a fresh private room is not a collab file (yet)
     if (collab) markCollab(role, code) // a room that was created or joined on purpose
     if (docIdRef.current) {
       try {
-        localStorage.setItem(roomKey(docIdRef.current), code)
+        if (code) localStorage.setItem(roomKey(docIdRef.current), code)
+        else localStorage.removeItem(roomKey(docIdRef.current))
       } catch {
         // ignore storage errors
       }
       // the server remembers which room this document belongs to (for the offline marks)
-      saveDocument(docIdRef.current, { roomCode: code })
+      saveDocument(docIdRef.current, { roomCode: code || null })
         .then(() => refreshFlagsRef.current())
         .catch(() => { })
     }
-    addRecentRoom(code)
+    if (code) addRecentRoom(code)
   }
 
   // Used by the join box (top right) and by "Collab Files". Returns true when it worked.
@@ -590,9 +614,9 @@ function EditorPage() {
       `Join room ${code}?\n\nThis document will show that room's live content, and your document is updated with it as soon as you edit.`
     )
     if (!ok) return false
-    const role = readRole(user, code) || 'collab' // your own old room = host, anyone else's = collaborator
     const join = async () => {
-      if (role === 'collab') await requestRoomMembership(code)
+      const membership = await requestRoomMembership(code)
+      const role = membership.role || readRole(user, code) || 'collab'
       applyRoom(code, role, true)
       showToast(
         role === 'collab' ? `Join request sent for room ${code}` : `Joined room ${code}`,
@@ -607,45 +631,20 @@ function EditorPage() {
   }
 
   const handleNewRoomCode = async () => {
-   const code = generateRoomCode()
+    const code = generateRoomCode()
 
-   try {
-    const token = getToken()
+    try {
+      await createRoom(code, docIdRef.current)
 
-    const response = await fetch('http://localhost:5000/api/rooms', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        roomCode: code,
-        documentId: docIdRef.current,
-      }),
-    })
+      // MongoDB room successfully created. Now start its Yjs connection.
+      applyRoom(code, 'host', true)
 
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Could not create room')
+      showToast(`New room ${code} is ready - share the code or link`, 'success')
+    } catch (error) {
+      if (error.status === 401) goToLogin()
+      showToast(error.message || 'Could not create room', 'error')
     }
-
-    // MongoDB room successfully created.
-    // Now start the Yjs room.
-    applyRoom(code, 'host', true)
-
-    showToast(
-      `New room ${code} is ready - share the code or link`,
-      'success'
-    )
-  } catch (error) {
-    console.error('Room creation failed:', error)
-    showToast(
-      error.message || 'Could not create room',
-      'error'
-    )
   }
-}
 
   // Leave the shared room and go back to your own private copy of the document
   const handleLeaveRoom = () => {
@@ -657,7 +656,7 @@ function EditorPage() {
     if (!window.confirm(question)) return
     if (roomAccess === 'granted') dirtyRef.current.html = true // keep the latest shared text in your own document
     flushSave()
-    applyRoom(generateRoomCode(), 'host')
+    applyRoom('', 'host')
     showToast('You left the room. This document is private again.', 'success')
   }
 
@@ -772,7 +771,8 @@ function EditorPage() {
     setPresence({ scope: '', list: [] })
     setAccessState({ scope: '', value: 'granted' })
     setRoomRole('host')
-    setRoomCode('')
+    setRoomBinding({ documentId: docId, code: '' })
+    setRoomJoinRequests([])
 
     getDocument(docId)
       .then(async (data) => {
@@ -784,40 +784,54 @@ function EditorPage() {
         latestContentRef.current = { html, text: htmlToPlainText(html) }
         dirtyRef.current = { html: false, title: false, toolState: false }
 
-        // Which room? A shared link wins, then the room this document used last, then a fresh one.
+        // Check the URL invite first, then MongoDB and local storage. A candidate
+        // is used only if the authenticated REST lookup confirms its Room exists.
         const fromLink = cleanRoom(pendingRoomRef.current)
         pendingRoomRef.current = null
-        let code = fromLink.length >= 4 ? fromLink : ''
-        let role = code ? readRole(user, code) || 'collab' : null // a link from someone else = collaborator
-        if (!code) {
+        let localCode = ''
+        try {
+          localCode = cleanRoom(localStorage.getItem(roomKey(docId)))
+        } catch {
+          localCode = ''
+        }
+        const persistedCode = cleanRoom(data.document.roomCode)
+        const candidates = [...new Set([fromLink, persistedCode, localCode]
+          .filter((candidate) => candidate.length >= 4))]
+        let code = ''
+        let role = 'host'
+        let roomExists = false
+
+        for (const candidate of candidates) {
           try {
-            code = cleanRoom(localStorage.getItem(roomKey(docId)))
-          } catch {
-            code = ''
+            const membership = await requestRoomMembership(candidate)
+            code = candidate
+            roomExists = true
+            role = membership.role || readRole(user, candidate) || 'collab'
+            break
+          } catch (error) {
+            // A stale URL, MongoDB, or local-storage code is not a room unless the
+            // authenticated REST lookup finds its Room. Try the next saved source.
+            if (error.status !== 404) throw error
           }
-          role = code.length >= 4 ? readRole(user, code) || 'host' : null
         }
-        if (code.length < 4) {
-          code = generateRoomCode()
-          role = 'host'
-        }
-        if (role === 'collab') await requestRoomMembership(code)
+        const isCollaborative = roomExists && !!code
         if (cancelled) return
         try {
-          localStorage.setItem(roomKey(docId), code)
+          if (code) localStorage.setItem(roomKey(docId), code)
+          else localStorage.removeItem(roomKey(docId))
         } catch {
           // ignore storage errors
         }
-        writeRole(user, code, role)
+        if (code) writeRole(user, code, role)
         setRoomRole(role)
-        setRoomCode(code)
-        if (data.document.roomCode !== code) {
+        setRoomBinding({ documentId: docId, code: isCollaborative ? code : '' })
+        if ((data.document.roomCode || null) !== (code || null)) {
           // the server remembers which room this document belongs to (for the offline marks)
-          saveDocument(docId, { roomCode: code })
+          saveDocument(docId, { roomCode: code || null })
             .then(() => refreshFlagsRef.current())
             .catch(() => { })
         }
-        if (fromLink.length >= 4) {
+        if (fromLink.length >= 4 && code) {
           addRecentRoom(code)
           showToast(`Joined room ${code}`, 'success')
         }
@@ -986,10 +1000,7 @@ function EditorPage() {
 
   // Live title sync through the same room the editor uses
   const { publishTitle } = useSharedTitle({
-  enabled:
-    loadState === 'ready' &&
-    !!loadedDocId &&
-    !!yjsConnection,
+  enabled: currentDocumentReady && !!yjsConnection,
   docId: loadedDocId,
   roomCode,
   role: roomRole,
@@ -1169,30 +1180,36 @@ function EditorPage() {
         )}
 
         {/* ---- Room ID Generator panel ---- */}
-        {panel === 'room' && roomCode && (
+        {panel === 'room' && (
           <div className="sidebar-panel">
             <div className="panel-title-row">
-              <span className="panel-title">Current room</span>
+              <span className="panel-title">{roomCode ? 'Current room' : 'Collaboration room'}</span>
             </div>
-            <div className="room-code-display">
-              <code className="room-code-value">{roomCode}</code>
-              <button
-                type="button"
-                className="room-code-copy"
-                onClick={handleCopyRoomCode}
-                title={roomCodeCopied ? 'Copied!' : 'Copy code'}
-              >
-                {roomCodeCopied ? <CheckIcon /> : <CopyIcon />}
-              </button>
-            </div>
-            <button type="button" className="room-code-link" onClick={handleCopyRoomLink}>
-              {roomLinkCopied ? <CheckIcon /> : <LinkIcon />}
-              <span>{roomLinkCopied ? 'Link copied!' : 'Copy invite link'}</span>
-            </button>
+            {roomCode ? (
+              <>
+                <div className="room-code-display">
+                  <code className="room-code-value">{roomCode}</code>
+                  <button
+                    type="button"
+                    className="room-code-copy"
+                    onClick={handleCopyRoomCode}
+                    title={roomCodeCopied ? 'Copied!' : 'Copy code'}
+                  >
+                    {roomCodeCopied ? <CheckIcon /> : <CopyIcon />}
+                  </button>
+                </div>
+                <button type="button" className="room-code-link" onClick={handleCopyRoomLink}>
+                  {roomLinkCopied ? <CheckIcon /> : <LinkIcon />}
+                  <span>{roomLinkCopied ? 'Link copied!' : 'Copy invite link'}</span>
+                </button>
+                <p className="panel-note">Anyone who enters this code (or opens the link) edits this document live with you.</p>
+              </>
+            ) : (
+              <p className="panel-note">This document is private. Create a room when you are ready to collaborate.</p>
+            )}
             <button type="button" className="room-code-new" onClick={handleNewRoomCode}>
-              Generate new room
+              {roomCode ? 'Generate new room' : 'Create collaboration room'}
             </button>
-            <p className="panel-note">Anyone who enters this code (or opens the link) edits this document live with you.</p>
           </div>
         )}
 
@@ -1287,12 +1304,12 @@ function EditorPage() {
                 display: none !important;
               }
             `}</style>
-            {loadState === 'ready' && (
+            {currentDocumentReady && (
               <Editor
-                key={`${docId}-${roomCode}`}
+                key={`${docId}-${editorRoomCode}`}
                 documentId={docId}
                 documentTitle={title}
-                roomCode={roomCode}
+                roomCode={editorRoomCode}
                 role={roomRole}
                 user={user}
                 initialHtml={initialHtml}

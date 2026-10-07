@@ -810,7 +810,7 @@ function Editor({
   const activeCellRef = useRef(null) // last spreadsheet cell used (kept for the formula bar)
   const codeLangRef = useRef(initialToolState?.codeLang || 'JavaScript')
 
-  const accessRef = useRef(role === 'host' ? 'granted' : 'pending') // 'granted' | 'pending' | 'denied'
+  const accessRef = useRef(role === 'host' ? 'granted' : 'pending') // 'granted' | 'pending' | 'denied' | 'closed'
   const selfRef = useRef({ id: 'guest', name: 'Guest', color: HOST_COLOR, role: 'host' })
   const unitSigsRef = useRef([]) // fingerprints of every unit, to see which ones a person changed
   const decideRef = useRef(null) // host: (request, allow) => approve / deny a join request
@@ -891,13 +891,36 @@ function Editor({
 
   // Set up the shared Yjs document + WebSocket connection (again whenever the room changes)
   useEffect(() => {
+    if (!roomCode) {
+      ydocRef.current = null
+      ytextRef.current = null
+      ytoolRef.current = null
+      providerRef.current = null
+      accessRef.current = 'granted'
+      setAccess('granted')
+      setSynced(true)
+      setPeople([])
+      setPending([])
+      if (onPresenceRef.current) onPresenceRef.current([])
+      if (onAccessRef.current) onAccessRef.current('granted')
+      if (onYjsReady) onYjsReady(null)
+      if (editorRef.current) {
+        editorRef.current.innerHTML = initialHtml || ''
+        lastHtmlRef.current = editorRef.current.innerHTML
+      }
+      snapshotUnits()
+      return () => {
+        if (onYjsReady) onYjsReady(null)
+      }
+    }
+
     setSynced(false)
     const ydoc = new Y.Doc()
     const provider = new WebsocketProvider(WS_URL, roomName, ydoc, {
       params: { token: getToken() || '' },
-      // A 4403 response means MongoDB says this account was denied. Pending users
-      // still receive 1008 and keep retrying so approval can let them in later.
-      shouldReconnect: (event) => event.code !== 4403,
+      // Pending users receive 1008 and keep retrying so approval can let them in later.
+      // Denied users and clients whose room was deleted must stop reconnecting.
+      shouldReconnect: (event) => event.code !== 4403 && event.code !== 4404,
     })
     if (onYjsReady) {
      onYjsReady({ ydoc, provider })
@@ -1033,6 +1056,17 @@ function Editor({
     }
 
     const onConnectionClosed = (event) => {
+      if (event?.code === 4404) {
+        accessRef.current = 'closed'
+        setAccess('closed')
+        setSynced(true)
+        setPeople([])
+        setPending([])
+        if (onAccessRef.current) onAccessRef.current('closed')
+        if (onPresenceRef.current) onPresenceRef.current([])
+        notify('This collaboration room no longer exists. The editor is read-only.', 'error')
+        return
+      }
       if (isHost || event?.code !== 4403) return
 
       accessRef.current = 'denied'
@@ -1750,7 +1784,9 @@ if (el.innerHTML !== cleanHtml) {
         <div className={`access-banner ${access}`} role="status">
           {access === 'denied'
             ? 'Your access to this room was denied. The editor is read-only.'
-            : !synced
+            : access === 'closed'
+              ? 'This collaboration room no longer exists. The editor is read-only.'
+              : !synced
               ? 'Connecting to the room...'
               : 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'}
         </div>

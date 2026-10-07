@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Folder = require("../models/Folder");
 const Document = require("../models/Document");
 const requireAuth = require("../middleware/auth");
+const deleteDocumentsWithCollaboration = require("../utils/deleteDocumentsWithCollaboration");
 
 const router = express.Router();
 
@@ -119,10 +120,12 @@ router.delete("/:id", checkId, async (req, res) => {
     const all = await Folder.find({ owner: req.userId }).select("parent").lean();
     const folderIds = [...collectTree(folder._id, all)];
 
-    const docs = await Document.find({ owner: req.userId, folder: { $in: folderIds } }).select("_id").lean();
+    const docs = await Document.find({ owner: req.userId, folder: { $in: folderIds } })
+      .select("_id roomCode")
+      .lean();
     const documentIds = docs.map((d) => String(d._id));
 
-    await Document.deleteMany({ _id: { $in: documentIds } });
+    await deleteDocumentsWithCollaboration(docs);
     await Folder.deleteMany({ _id: { $in: folderIds }, owner: req.userId });
 
     res.json({ success: true, deletedFolderIds: folderIds, deletedDocumentIds: documentIds });
