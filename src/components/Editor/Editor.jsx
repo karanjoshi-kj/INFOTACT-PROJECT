@@ -825,7 +825,8 @@ function Editor({
   const [textAlign, setTextAlign] = useState(init.textAlign || 'left')
   const [access, setAccess] = useState(role === 'host' ? 'granted' : 'pending')
   const [pending, setPending] = useState([]) // host: people waiting to be let in
-  const [people, setPeople] = useState([]) // everyone allowed in the room (for the colour key)
+  const [, setPeople] = useState([]) // everyone allowed in the room (for the colour key)
+  const [legendPeople, setLegendPeople] = useState([]) // colour key: online people + saved colours of people who are offline / left
   const [synced, setSynced] = useState(false) // true once the room's saved state (incl. approvals) has arrived
   const [sheetCell, setSheetCell] = useState(null) // { ref, content } shown in the formula bar
   const [exportingPdf, setExportingPdf] = useState(false)
@@ -900,6 +901,7 @@ function Editor({
       setAccess('granted')
       setSynced(true)
       setPeople([])
+      setLegendPeople([])
       setPending([])
       if (onPresenceRef.current) onPresenceRef.current([])
       if (onAccessRef.current) onAccessRef.current('granted')
@@ -981,6 +983,8 @@ function Editor({
 
     let lastPeopleSig = '' // what was last reported, so an unchanged list is never re-sent
     let lastWaitingSig = ''
+    let lastLegendSig = ''
+    const seenPeople = new Map() // userId -> last person seen in this room (keeps the host / people who just left in the colour key)
 
     const emitPresence = () => {
       if (!isHost && accessRef.current === 'denied') {
@@ -988,6 +992,10 @@ function Editor({
           lastPeopleSig = '[]'
           setPeople([])
           if (onPresenceRef.current) onPresenceRef.current([])
+        }
+        if (lastLegendSig !== '[]') {
+          lastLegendSig = '[]'
+          setLegendPeople([])
         }
         return
       }
@@ -1027,6 +1035,43 @@ function Editor({
         setPeople(list)
         if (onPresenceRef.current) onPresenceRef.current(list)
       }
+
+      // Colour key: everyone online PLUS the saved colour of every collaborator who is offline,
+      // disconnected or has left. The colours live in the room's saved state (approvals + colours),
+      // so they stay available no matter who is connected.
+      const legend = new Map(list.map((p) => [p.id, p]))
+      list.forEach((p) => {
+        if (!p.isSelf) seenPeople.set(p.id, p)
+      })
+      if (accessRef.current === 'granted') {
+        approvals.forEach((rec, id) => {
+          if (legend.has(id) || id === myId || !rec || rec.status !== 'approved') return
+          const savedColor = colors.get(id)
+          if (!savedColor) return
+          legend.set(id, { id, name: rec.name || 'Collaborator', color: savedColor, role: 'collab', isSelf: false })
+        })
+        seenPeople.forEach((p, id) => {
+          if (legend.has(id) || id === myId) return
+          const rec = approvals.get(id)
+          if (p.role !== 'host' && !(rec && rec.status === 'approved')) return // removed / declined: no longer in the room
+          legend.set(id, { ...p, color: colors.get(id) || p.color, isSelf: false })
+        })
+        if (!isHost) {
+          // the host may be offline before this person ever saw them: their colour is kept in the room too
+          colors.forEach((c, id) => {
+            if (legend.has(id) || id === myId || c !== HOST_COLOR || approvals.has(id)) return
+            legend.set(id, { id, name: 'Host', color: c, role: 'host', isSelf: false })
+          })
+        }
+      }
+      const legendList = Array.from(legend.values())
+      legendList.sort((a, b) => (b.role === 'host') - (a.role === 'host')) // host first
+      const legendSig = JSON.stringify(legendList.map((p) => [p.id, p.name, p.color, p.role, p.isSelf]))
+      if (legendSig !== lastLegendSig) {
+        lastLegendSig = legendSig
+        setLegendPeople(legendList)
+      }
+
       if (isHost) {
         const storedRequests = pendingRoomMembersRef.current.map((request) => ({
           id: String(request.id),
@@ -1061,6 +1106,7 @@ function Editor({
         setAccess('closed')
         setSynced(true)
         setPeople([])
+        setLegendPeople([])
         setPending([])
         if (onAccessRef.current) onAccessRef.current('closed')
         if (onPresenceRef.current) onPresenceRef.current([])
@@ -1793,10 +1839,10 @@ if (el.innerHTML !== cleanHtml) {
       )}
 
       {/* Colour key: which colour belongs to which person */}
-      {people.length > 1 && (
+      {legendPeople.length > 1 && (
         <div className="author-legend" aria-label="Who wrote what">
           <span className="author-legend-title">Edits by</span>
-          {people.map((p) => (
+          {legendPeople.map((p) => (
             <span key={p.id} className={`author-chip ${p.role === 'host' ? 'host' : ''}`}>
               <i style={{ background: p.color }} />
               {p.name}

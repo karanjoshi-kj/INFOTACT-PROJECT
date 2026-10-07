@@ -486,7 +486,7 @@ function EditorPage() {
       if (collabSavedRef.current[id] === key) delete collabSavedRef.current[id] // try again next time
       if (err.status === 401) goToLogin()
     })
-  }, [])
+  }, [goToLogin])
 
   // persist = false when the document itself no longer exists (nothing to update on the server)
   const removeCollab = useCallback((id, persist = true) => {
@@ -498,7 +498,7 @@ function EditorPage() {
         if (err.status === 401) goToLogin()
       })
     }
-  }, [])
+  }, [goToLogin])
 
   // A document becomes a collab file when you join a room, or when someone joins yours
   useEffect(() => {
