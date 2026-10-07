@@ -2,9 +2,10 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import Toolbar from './Toolbar.jsx'
-import { exportDocumentPdf } from '../../services/api.js'
+import { exportDocumentPdf, updateRoomMemberStatus } from '../../services/api.js'
 import './Editor.css'
 import { getToken } from '../../utils/auth.js'
+import DOMPurify from 'dompurify'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:1234'
 
@@ -772,9 +773,11 @@ function Editor({
   initialHtml = '',
   onChange,
   onRemoteChange,
+  onYjsReady,
   onPresenceChange,
   onNotify,
   onAccessChange,
+  pendingRoomMembers = [],
   user,
   roomCode = '',
   role = 'host',
@@ -795,6 +798,8 @@ function Editor({
   onNotifyRef.current = onNotify
   const onAccessRef = useRef(onAccessChange)
   onAccessRef.current = onAccessChange
+  const pendingRoomMembersRef = useRef(pendingRoomMembers)
+  pendingRoomMembersRef.current = pendingRoomMembers
 
   const ydocRef = useRef(null)
   const ytextRef = useRef(null)
@@ -824,6 +829,16 @@ function Editor({
   const [synced, setSynced] = useState(false) // true once the room's saved state (incl. approvals) has arrived
   const [sheetCell, setSheetCell] = useState(null) // { ref, content } shown in the formula bar
   const [exportingPdf, setExportingPdf] = useState(false)
+
+  useEffect(() => {
+    if (role !== 'host') return
+    setPending(pendingRoomMembers.map((request) => ({
+      ...request,
+      color: colorFor(request.name || ''),
+      clientId: `room-member-${request.id}`,
+      req: 0,
+    })))
+  }, [pendingRoomMembers, role])
 
   // Yjs shared tool-state map – syncs active tab / list style / align across collaborators
   const ytoolRef = useRef(null)
@@ -878,7 +893,15 @@ function Editor({
   useEffect(() => {
     setSynced(false)
     const ydoc = new Y.Doc()
-    const provider = new WebsocketProvider(WS_URL, roomName, ydoc, { params: { token: getToken() || '' } })
+    const provider = new WebsocketProvider(WS_URL, roomName, ydoc, {
+      params: { token: getToken() || '' },
+      // A 4403 response means MongoDB says this account was denied. Pending users
+      // still receive 1008 and keep retrying so approval can let them in later.
+      shouldReconnect: (event) => event.code !== 4403,
+    })
+    if (onYjsReady) {
+     onYjsReady({ ydoc, provider })
+    }
     const ytext = ydoc.getText('content')
     const approvals = ydoc.getMap('approvals') // userId -> { status: 'approved' | 'denied', ... }
     const colors = ydoc.getMap('colors') // userId -> colour (one per person, no repeats)
@@ -937,6 +960,15 @@ function Editor({
     let lastWaitingSig = ''
 
     const emitPresence = () => {
+      if (!isHost && accessRef.current === 'denied') {
+        if (lastPeopleSig !== '[]') {
+          lastPeopleSig = '[]'
+          setPeople([])
+          if (onPresenceRef.current) onPresenceRef.current([])
+        }
+        return
+      }
+
       // One entry per ACCOUNT (userId), never per socket: awareness has one state per
       // connection, so a reconnect / second tab / lingering old state of the same
       // person would otherwise show up as a second collaborator.
@@ -973,12 +1005,24 @@ function Editor({
         if (onPresenceRef.current) onPresenceRef.current(list)
       }
       if (isHost) {
-        const waitingSig = JSON.stringify(waiting.map((p) => [p.clientId, p.id, p.name, p.color, p.req]))
+        const storedRequests = pendingRoomMembersRef.current.map((request) => ({
+          id: String(request.id),
+          name: request.name || 'Collaborator',
+          color: colorFor(request.name || ''),
+          clientId: `room-member-${request.id}`,
+          req: 0,
+        }))
+        const combinedWaiting = new Map(storedRequests.map((request) => [request.id, request]))
+        waiting.forEach((request) => {
+          if (!combinedWaiting.has(request.id)) combinedWaiting.set(request.id, request)
+        })
+        const pendingRequests = Array.from(combinedWaiting.values())
+        const waitingSig = JSON.stringify(pendingRequests.map((p) => [p.clientId, p.id, p.name, p.color, p.req]))
         if (waitingSig !== lastWaitingSig) {
           lastWaitingSig = waitingSig
-          setPending(waiting)
+          setPending(pendingRequests)
         }
-        waiting.forEach((p) => {
+        pendingRequests.forEach((p) => {
           const key = `${p.id}:${p.req}`
           if (!notifiedRef.current.has(key)) {
             notifiedRef.current.add(key)
@@ -987,6 +1031,18 @@ function Editor({
         })
       }
     }
+
+    const onConnectionClosed = (event) => {
+      if (isHost || event?.code !== 4403) return
+
+      accessRef.current = 'denied'
+      setAccess('denied')
+      setSynced(true)
+      if (onAccessRef.current) onAccessRef.current('denied')
+      emitPresence()
+      notify('Your access to this room was denied by the host. The editor is read-only.', 'error')
+    }
+    provider.on('closed', onConnectionClosed)
 
     // ---- the host's answer to a join request ----
     const evalAccess = () => {
@@ -1008,7 +1064,14 @@ function Editor({
       if (next === 'denied' && before !== 'denied') notify('The host declined your request', 'error')
     }
 
-    decideRef.current = (request, allow) => {
+    decideRef.current = async (request, allow) => {
+      try {
+        await updateRoomMemberStatus(roomCode, request.id, allow ? 'approved' : 'denied')
+      } catch (error) {
+        notify(error.message || `Could not ${allow ? 'approve' : 'deny'} this room request`, 'error')
+        return
+      }
+
       approvals.set(
         request.id,
         allow
@@ -1083,10 +1146,12 @@ function Editor({
       const el = editorRef.current
       if (el) {
         const newHtml = ytext.toString()
-        if (el.innerHTML !== newHtml) {
-          applySharedHtml(el, newHtml)
-          lastHtmlRef.current = el.innerHTML
-          snapshotUnits()
+const cleanHtml = DOMPurify.sanitize(newHtml)
+
+if (el.innerHTML !== cleanHtml) {
+  applySharedHtml(el, cleanHtml)
+  lastHtmlRef.current = el.innerHTML
+  snapshotUnits()
           if (onRemoteChangeRef.current) {
             onRemoteChangeRef.current({ html: el.innerHTML, text: el.innerText })
           }
@@ -1135,12 +1200,16 @@ function Editor({
     })
 
     return () => {
+      provider.off('closed', onConnectionClosed)
       provider.awareness.off('change', emitPresence)
       approvals.unobserve(onApprovals)
       colors.unobserve(onColors)
       ytool.unobserve(onToolState)
       ytext.unobserve(updateDOM)
       decideRef.current = null
+      if (onYjsReady) {
+       onYjsReady(null)
+      }
       provider.destroy()
       ydoc.destroy()
     }
@@ -1679,11 +1748,11 @@ function Editor({
       {/* Collaborator waiting for the host */}
       {access !== 'granted' && (
         <div className={`access-banner ${access}`} role="status">
-          {!synced
-            ? 'Connecting to the room...'
-            : access === 'pending'
-              ? 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'
-              : 'The host declined your request. Use Leave to go back to your own document.'}
+          {access === 'denied'
+            ? 'Your access to this room was denied. The editor is read-only.'
+            : !synced
+              ? 'Connecting to the room...'
+              : 'Waiting for the host to approve your request to join. You can use Leave to go back to your own document.'}
         </div>
       )}
 

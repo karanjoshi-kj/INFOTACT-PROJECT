@@ -9,7 +9,7 @@ const memberSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved"],
+      enum: ["pending", "approved", "denied"],
       default: "pending",
     },
   },

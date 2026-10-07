@@ -13,9 +13,26 @@ const RESTORE_ORIGIN = "approvals-restore"; // marks changes the server itself m
 const RESTORE_TIMEOUT_MS = 3000;
 const SNAPSHOT_DELAY_MS = 1500; // wait this long after the last edit before saving the room content
 const FLAG_DELAY_MS = 500; // wait this long before saving "missed while offline" marks
+const ACCESS_DENIED_CLOSE_CODE = 4403;
 
 // doc -> room state kept by the server (see newState)
 const roomStates = new WeakMap();
+let activeWss = null;
+
+function revokeRoomMember(roomCode, userId) {
+  if (!activeWss) return;
+
+  activeWss.clients.forEach((client) => {
+    if (
+      String(client.roomCode) === String(roomCode) &&
+      String(client.userId) === String(userId) &&
+      client.readyState === WebSocket.OPEN
+    ) {
+      client.close(ACCESS_DENIED_CLOSE_CODE, "Room access denied by host");
+    }
+  });
+}
+
 async function authenticateWebSocket(req) {
   try {
     const url = new URL(req.url, "http://localhost");
@@ -75,28 +92,29 @@ async function authorizeRoom(roomCode, userId) {
     const isHost =
       String(room.hostId) === String(userId);
 
-    const isApprovedMember =
-      room.members.some(
-        (member) =>
-          String(member.userId) === String(userId) &&
-          member.status === "approved"
-      );
+    const membership = room.members.find(
+      (member) => String(member.userId) === String(userId)
+    );
+    const isApprovedMember = membership?.status === "approved";
 
     if (!isHost && !isApprovedMember) {
-     console.log("WebSocket room access denied:", {
-      roomCode,
-      userId,
-      isHost,
-      isApprovedMember,
-    });
+      console.log("WebSocket room access denied:", {
+        roomCode,
+        userId,
+        isHost,
+        isApprovedMember,
+        membershipStatus: membership?.status || "none",
+      });
 
-  return {
-    ok: false,
-    code: 1008,
-    message:
-      "You are not an approved member of this room",
-  };
-}
+      return {
+        ok: false,
+        code: membership?.status === "denied" ? ACCESS_DENIED_CLOSE_CODE : 1008,
+        message:
+          membership?.status === "denied"
+            ? "Room access denied by host"
+            : "You are not an approved member of this room",
+      };
+    }
 
     return {
       ok: true,
@@ -452,108 +470,125 @@ function saveOnClose(ws, docName) {
 function startYjsServer(port) {
   const server = http.createServer();
   const wss = new WebSocket.Server({ server });
+  activeWss = wss;
 
   wss.on("connection", async (ws, req) => {
-  try {
-    const docName =
-      (req.url || "/").slice(1).split("?")[0];
+    const docName = (req.url || "/").slice(1).split("?")[0];
 
-    if (!docName.startsWith(ROOM_PREFIX)) {
-      ws.close(1008, "Invalid room");
-      return;
-    }
-
-    const roomCode =
-      docName.slice(ROOM_PREFIX.length);
-
-    // 1. Check JWT
-    const auth =
-      await authenticateWebSocket(req);
-
-    if (!auth.ok) {
-      ws.close(auth.code, auth.message);
-      return;
-    }
-
-    // 2. Check room membership
-    const authorization =
-      await authorizeRoom(
-        roomCode,
-        auth.userId
-      );
-
-    if (!authorization.ok) {
-      ws.close(
-        authorization.code,
-        authorization.message
-      );
-      return;
-    }
-
-    ws.userId = auth.userId;
-    ws.roomCode = roomCode;
-
-    // 3. Existing room preparation
-    const waiting =
-      prepareRoom(docName);
-
-    if (!waiting) {
-      setupWSConnection(ws, req);
-      saveOnClose(ws, docName);
-      return;
-    }
-
+    // WebsocketProvider sends its first Yjs sync message immediately on open.
+    // Authentication and room restoration below are asynchronous, so buffer from
+    // the start or that first sync step can be lost before setupWSConnection listens.
     const held = [];
-
     const hold = (data, isBinary) => {
       held.push([data, isBinary]);
     };
-
+    const discardHeld = () => {
+      ws.off("message", hold);
+      held.length = 0;
+    };
     ws.on("message", hold);
 
-    await waiting;
+    const startYjsConnection = () => {
+      ws.off("message", hold);
+      if (ws.readyState !== WebSocket.OPEN) {
+        held.length = 0;
+        return false;
+      }
 
-    if (
-      ws.readyState !== WebSocket.OPEN
-    ) {
-      return;
-    }
+      setupWSConnection(ws, req);
+      saveOnClose(ws, docName);
 
-    ws.off("message", hold);
+      // setupWSConnection must install its listener before replaying the messages
+      // received while authentication / room restoration was in progress.
+      held.splice(0).forEach(([data, isBinary]) => {
+        ws.emit("message", data, isBinary);
+      });
+      return true;
+    };
 
-    // 4. Start Yjs only after authentication
-    setupWSConnection(ws, req);
-
-    saveOnClose(ws, docName);
-
-    held.forEach(([data, isBinary]) => {
-      ws.emit(
-        "message",
-        data,
-        isBinary
-      );
+    ws.on("close", () => {
+      discardHeld();
     });
 
-  } catch (error) {
-    console.error(
-      "WebSocket connection error:",
-      error
-    );
+    ws.on("error", (error) => {
+      console.error("Yjs WebSocket error:", error.message);
+    });
 
-    if (
-      ws.readyState === WebSocket.OPEN
-    ) {
-      ws.close(
-        1011,
-        "Internal server error"
+    try {
+      if (!docName.startsWith(ROOM_PREFIX)) {
+        discardHeld();
+        ws.close(1008, "Invalid room");
+        return;
+      }
+
+      const roomCode =
+        docName.slice(ROOM_PREFIX.length);
+
+      // 1. Check JWT
+      const auth =
+        await authenticateWebSocket(req);
+
+      if (!auth.ok) {
+        discardHeld();
+        ws.close(auth.code, auth.message);
+        return;
+      }
+
+      // 2. Check room membership
+      const authorization =
+        await authorizeRoom(
+          roomCode,
+          auth.userId
+        );
+
+      if (!authorization.ok) {
+        discardHeld();
+        ws.close(
+          authorization.code,
+          authorization.message
+        );
+        return;
+      }
+
+      ws.userId = auth.userId;
+      ws.roomCode = roomCode;
+
+      // 3. Existing room preparation
+      const waiting = prepareRoom(docName);
+      await waiting;
+
+      if (
+        ws.readyState !== WebSocket.OPEN
+      ) {
+        discardHeld();
+        return;
+      }
+
+      // 4. Start Yjs only after authentication
+      startYjsConnection();
+    } catch (error) {
+      discardHeld();
+      console.error(
+        "WebSocket connection error:",
+        error
       );
+
+      if (
+        ws.readyState === WebSocket.OPEN
+      ) {
+        ws.close(
+          1011,
+          "Internal server error"
+        );
+      }
     }
-  }
-});
+  });
 
   server.listen(port, () => {
     console.log(`Yjs WebSocket server running on port ${port}`);
   });
 }
+
+startYjsServer.revokeRoomMember = revokeRoomMember;
 
 module.exports = startYjsServer;

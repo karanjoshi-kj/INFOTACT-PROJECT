@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react'
-import * as Y from 'yjs'
-import { WebsocketProvider } from 'y-websocket'
-
-const WS_URL = 'ws://localhost:1234' // same live-sync server the editor uses
 
 // Keeps the document title the same for everyone in a room.
 //
-// The editor shares the document text through the Yjs room "syncdoc-room-<CODE>".
-// This hook joins that SAME room and shares the title in a small Y.Map called "meta".
+// The editor shares document text through the Yjs room "syncdoc-room-<CODE>".
+// This hook uses that same Y.Doc and provider to share the title in a Y.Map called "meta".
 //   - A rename is written into the map, so the server sends it to every collaborator at once.
 //   - A rename from someone else is handed to `onRemoteTitle` (the page shows it and saves it).
 //   - On join / refresh / reconnect the title stored in the room is applied, so nobody keeps an old name.
@@ -15,7 +11,18 @@ const WS_URL = 'ws://localhost:1234' // same live-sync server the editor uses
 //   - Yjs keeps one value per key, so two people renaming at once end up with the same final title everywhere.
 //   - `onSynced` is called each time an approved person has received the room's latest state
 //     (the page uses it to clear the "changed while you were offline" mark).
-export default function useSharedTitle({ enabled, docId, roomCode, role, access, getTitle, onRemoteTitle, onSynced }) {
+export default function useSharedTitle({
+  enabled,
+  docId,
+  roomCode,
+  role,
+  access,
+  getTitle,
+  onRemoteTitle,
+  onSynced,
+  ydoc,
+  provider,
+}) {
   const ymetaRef = useRef(null)
   const syncedRef = useRef(false) // true once the room's current state has arrived
   const pendingRef = useRef(null) // a rename made before the first sync (sent right after it)
@@ -33,10 +40,8 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
 
   useEffect(() => {
     if (!enabled || !roomCode) return undefined
+    if (!ydoc || !provider) return undefined
 
-    const ydoc = new Y.Doc()
-    const provider = new WebsocketProvider(WS_URL, `syncdoc-room-${roomCode}`, ydoc)
-    provider.awareness.setLocalState(null) // not a person: stays out of the collaborator list
     const ymeta = ydoc.getMap('meta')
 
     ymetaRef.current = ymeta
@@ -60,7 +65,12 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
     }
 
     const onSync = (isSynced) => {
-      if (!isSynced) return
+      if (!isSynced) {
+        syncedRef.current = false
+        return
+      }
+      // The provider can emit "sync" just before the synced-state check below.
+      if (syncedRef.current) return
       syncedRef.current = true
 
       if (accessRef.current !== 'granted') return
@@ -85,6 +95,10 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
     ymeta.observe(onMeta)
     provider.on('sync', onSync)
 
+    // The hook may attach after the editor's provider has already finished syncing.
+    // Check the provider after subscribing so either the event or this check handles it.
+    if (provider.synced) onSync(true)
+
     return () => {
       provider.off('sync', onSync)
       ymeta.unobserve(onMeta)
@@ -92,10 +106,8 @@ export default function useSharedTitle({ enabled, docId, roomCode, role, access,
       syncedRef.current = false
       pendingRef.current = null
       applyRef.current = null
-      provider.destroy()
-      ydoc.destroy()
     }
-  }, [enabled, docId, roomCode, role])
+  }, [enabled, docId, roomCode, role, ydoc, provider])
 
   // Approved after joining: pick up the shared title right away
   useEffect(() => {

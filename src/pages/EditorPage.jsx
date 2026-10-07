@@ -12,7 +12,9 @@ import {
   listOfflineChanges,
   ackDocumentSynced,
   listCollabDocuments,
+  listRoomJoinRequests,
   markDocumentCollab,
+  requestRoomMembership,
   unmarkDocumentCollab,
 } from '../services/api.js'
 import useSharedTitle from '../hooks/useSharedTitle.js'
@@ -287,6 +289,7 @@ function EditorPage() {
   const [searchText, setSearchText] = useState('')
   const [allDocs, setAllDocs] = useState([])
   const [toast, setToast] = useState(null) // { message, type }
+  const [yjsConnection, setYjsConnection] = useState(null)
   const navigate = useNavigate()
   const user = getUser()
 
@@ -295,6 +298,7 @@ function EditorPage() {
   const [accessState, setAccessState] = useState({ scope: '', value: 'granted' }) // access, tagged with its document + room
   const [collabDocs, setCollabDocs] = useState([]) // shown in "Collab Files" (loaded from the server)
   const [offlineDocIds, setOfflineDocIds] = useState([]) // documents changed while you were offline (from the server)
+  const [roomJoinRequests, setRoomJoinRequests] = useState([])
 
   // Collaboration state belongs to ONE document + ONE room. Anything reported by an editor
   // (people online, access) is stored with that scope, and is only used while the open
@@ -372,10 +376,35 @@ function EditorPage() {
     setCharCount(text.length)
   }
 
-  const goToLogin = () => {
+  const goToLogin = useCallback(() => {
     clearSession()
     navigate('/login', { replace: true })
-  }
+  }, [navigate])
+
+  // Rejected WebSocket clients cannot publish awareness, so read pending requests from MongoDB.
+  useEffect(() => {
+    if (loadState !== 'ready' || roomRole !== 'host' || !roomCode) {
+      setRoomJoinRequests([])
+      return undefined
+    }
+
+    let cancelled = false
+    const refreshRoomRequests = async () => {
+      try {
+        const data = await listRoomJoinRequests(roomCode)
+        if (!cancelled) setRoomJoinRequests(data.requests || [])
+      } catch (error) {
+        if (!cancelled && error.status === 401) goToLogin()
+      }
+    }
+
+    refreshRoomRequests()
+    const timer = setInterval(refreshRoomRequests, 1500)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [loadState, roomRole, roomCode, goToLogin])
 
   // ---------------------------------------------------------------
   // OFFLINE CHANGE MARKS ("!" beside a document changed while you were offline)
@@ -562,11 +591,18 @@ function EditorPage() {
     )
     if (!ok) return false
     const role = readRole(user, code) || 'collab' // your own old room = host, anyone else's = collaborator
-    applyRoom(code, role, true)
-    showToast(
-      role === 'collab' ? `Joined room ${code} - waiting for the host to approve you` : `Joined room ${code}`,
-      'success'
-    )
+    const join = async () => {
+      if (role === 'collab') await requestRoomMembership(code)
+      applyRoom(code, role, true)
+      showToast(
+        role === 'collab' ? `Join request sent for room ${code}` : `Joined room ${code}`,
+        'success'
+      )
+    }
+    join().catch((error) => {
+      if (error.status === 401) goToLogin()
+      showToast(error.message || `Could not join room ${code}`, 'error')
+    })
     return true
   }
 
@@ -739,7 +775,7 @@ function EditorPage() {
     setRoomCode('')
 
     getDocument(docId)
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return
         const html = data.html || ''
 
@@ -765,6 +801,8 @@ function EditorPage() {
           code = generateRoomCode()
           role = 'host'
         }
+        if (role === 'collab') await requestRoomMembership(code)
+        if (cancelled) return
         try {
           localStorage.setItem(roomKey(docId), code)
         } catch {
@@ -948,21 +986,29 @@ function EditorPage() {
 
   // Live title sync through the same room the editor uses
   const { publishTitle } = useSharedTitle({
-    enabled: loadState === 'ready' && !!loadedDocId,
-    docId: loadedDocId,
-    roomCode,
-    role: roomRole,
-    access: roomAccess,
-    getTitle: () => titleRef.current,
-    onRemoteTitle: handleRemoteTitle,
-    onSynced: handleRoomSynced,
-  })
+  enabled:
+    loadState === 'ready' &&
+    !!loadedDocId &&
+    !!yjsConnection,
+  docId: loadedDocId,
+  roomCode,
+  role: roomRole,
+  access: roomAccess,
+  getTitle: () => titleRef.current,
+  onRemoteTitle: handleRemoteTitle,
+  onSynced: handleRoomSynced,
+  ydoc: yjsConnection?.ydoc,
+  provider: yjsConnection?.provider,
+})
 
   const handleTitleChange = (newTitle) => {
     setTitle(newTitle)
+
     if (newTitle === titleRef.current) return
+
     titleRef.current = newTitle
     dirtyRef.current.title = true
+
     publishTitle(newTitle)
     scheduleSave()
   }
@@ -1257,6 +1303,8 @@ function EditorPage() {
                 onPresenceChange={handlePresenceChange}
                 onAccessChange={handleAccessChange}
                 onNotify={showToast}
+                onYjsReady={setYjsConnection}
+                pendingRoomMembers={roomJoinRequests}
               />
             )}
 

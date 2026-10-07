@@ -106,6 +106,22 @@ export function unmarkDocumentCollab(id) {
   return request(`/collab/${id}`, { method: 'DELETE' })
 }
 
+// Room membership and approval requests use the logged-in user's JWT.
+export function requestRoomMembership(roomCode) {
+  return request('/rooms/join', { method: 'POST', body: { roomCode } })
+}
+
+export function listRoomJoinRequests(roomCode) {
+  return request(`/rooms/${encodeURIComponent(roomCode)}/requests`)
+}
+
+export function updateRoomMemberStatus(roomCode, userId, status) {
+  return request(
+    `/rooms/${encodeURIComponent(roomCode)}/members/${encodeURIComponent(userId)}`,
+    { method: 'PATCH', body: { status } }
+  )
+}
+
 export async function exportDocumentPdf(id, { html, title, toolState } = {}) {
   const authToken = getToken()
   let response

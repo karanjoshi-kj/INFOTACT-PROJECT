@@ -1,6 +1,8 @@
 const express = require("express");
 const Room = require("../models/Room");
 const Document = require("../models/Document");
+const User = require("../models/User");
+const startYjsServer = require("../sockets/yjsServer");
 const requireAuth = require("../middleware/auth");
 
 const router = express.Router();
@@ -98,14 +100,15 @@ router.post("/join", async (req, res) => {
       });
     }
 
-    const alreadyMember = room.members.some(
-      (member) => member.userId.toString() === userId
+    const existingMember = room.members.find(
+      (member) => String(member.userId) === userId
     );
 
-    if (alreadyMember) {
-      return res.status(409).json({
-        success: false,
-        message: "User is already a member of this room",
+    if (existingMember) {
+      return res.status(200).json({
+        success: true,
+        message: "User already has a room membership",
+        status: existingMember.status,
       });
     }
 
@@ -131,16 +134,60 @@ router.post("/join", async (req, res) => {
   }
 });
 
+// Pending requests are read from MongoDB because rejected WebSocket clients
+// cannot publish Yjs awareness to the host.
+router.get("/:roomCode/requests", async (req, res) => {
+  try {
+    const room = await Room.findOne({ roomCode: req.params.roomCode });
+
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        message: "Room not found",
+      });
+    }
+
+    if (String(room.hostId) !== String(req.userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the room host can view join requests",
+      });
+    }
+
+    const pendingMembers = room.members.filter((member) => member.status === "pending");
+    const users = await User.find({
+      _id: { $in: pendingMembers.map((member) => member.userId) },
+    })
+      .select("name")
+      .lean();
+    const nameById = new Map(users.map((user) => [String(user._id), user.name]));
+
+    res.json({
+      success: true,
+      requests: pendingMembers.map((member) => ({
+        id: String(member.userId),
+        name: nameById.get(String(member.userId)) || "Collaborator",
+      })),
+    });
+  } catch (error) {
+    console.error("List room join requests error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load room join requests",
+    });
+  }
+});
+
 // Approve or keep a member pending
 router.patch("/:roomCode/members/:userId", async (req, res) => {
   try {
     const { roomCode, userId } = req.params;
     const { status } = req.body;
 
-    if (!["approved", "pending"].includes(status)) {
+    if (!["approved", "pending", "denied"].includes(status)) {
       return res.status(400).json({
         success: false,
-        message: "Status must be approved or pending",
+        message: "Status must be approved, pending, or denied",
       });
     }
 
@@ -175,6 +222,10 @@ router.patch("/:roomCode/members/:userId", async (req, res) => {
     member.status = status;
 
     await room.save();
+
+    if (status === "denied") {
+      startYjsServer.revokeRoomMember(roomCode, userId);
+    }
 
     res.status(200).json({
       success: true,
