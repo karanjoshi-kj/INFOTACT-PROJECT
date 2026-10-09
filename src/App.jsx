@@ -3,6 +3,7 @@ import WelcomePage from './pages/WelcomePage.jsx'
 import LoginPage from './components/Auth/LoginPage.jsx'
 import SignupPage from './components/Auth/SignupPage.jsx'
 import ForgotPasswordPage from './components/Auth/ForgotPasswordPage.jsx'
+import ResetPasswordPage from './components/Auth/ResetPasswordPage.jsx'
 import OAuthCallback from './components/Auth/OAuthCallback.jsx'
 import { ProtectedRoute, PublicOnlyRoute } from './components/Auth/RouteGuards.jsx'
 import EditorPage from './pages/EditorPage.jsx'
@@ -38,6 +39,9 @@ function App() {
             </PublicOnlyRoute>
           }
         />
+
+        {/* Opened from the emailed link; works even if another user is logged in */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         {/* Landing page after Google / GitHub login */}
         <Route path="/oauth/callback" element={<OAuthCallback />} />

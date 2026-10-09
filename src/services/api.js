@@ -52,6 +52,19 @@ export function getCurrentUser(token) {
   return request('/auth/me', { token })
 }
 
+// Ask for a password-reset email. The answer is always generic: -> { message }
+export function forgotPassword(email) {
+  return request('/auth/forgot-password', { method: 'POST', body: { email } })
+}
+
+// Set a new password using the token from the emailed link: -> { message }
+export function resetPassword({ token, password, confirmPassword }) {
+  return request('/auth/reset-password', {
+    method: 'POST',
+    body: { token, password, confirmPassword },
+  })
+}
+
 // ---- documents ----
 
 // Every document owned by the logged-in user (light fields only, no html)

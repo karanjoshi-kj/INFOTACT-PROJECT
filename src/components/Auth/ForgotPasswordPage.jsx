@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { forgotPassword } from '../../services/api.js'
 import './ForgotPassword.css'
 
 const MailIcon = () => (
@@ -8,10 +10,33 @@ const MailIcon = () => (
   </svg>
 )
 
-// Password reset is not available in this build: the backend has no reset
-// endpoint and no email delivery is configured. This page therefore sends
-// nothing and collects no email address.
 function ForgotPasswordPage() {
+  const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+
+    const trimmed = email.trim()
+    if (!trimmed) {
+      setError('Please enter your email address.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const data = await forgotPassword(trimmed)
+      setSuccessMessage(data.message)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="forgot-page">
       <div className="forgot-glow-1"></div>
@@ -19,15 +44,38 @@ function ForgotPasswordPage() {
 
       <div className="forgot-card">
         <div className="forgot-header-icon"><MailIcon /></div>
-        <h1 className="forgot-title">Password reset unavailable</h1>
+        <h1 className="forgot-title">Forgot password?</h1>
         <p className="forgot-subtitle">
-          Self-service password reset is not available in this version of SyncDoc.
+          Enter the email you registered with and we will send you a link to reset your password.
         </p>
 
-        <div className="forgot-notice" role="status">
-          No reset email can be sent. If your account was created with Google or
-          GitHub, use that sign-in option; otherwise contact the project owner.
-        </div>
+        {error && <div className="forgot-error" role="alert">{error}</div>}
+
+        {successMessage ? (
+          <div className="forgot-success" role="status">
+            {successMessage} The link expires in 15 minutes. Check your spam folder if it does not arrive.
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="input-group">
+              <label className="forgot-label" htmlFor="forgot-email">Email</label>
+              <input
+                id="forgot-email"
+                className="forgot-input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+              />
+            </div>
+
+            <button className="forgot-button" type="submit" disabled={loading}>
+              {loading ? <span className="spinner" aria-label="Sending"></span> : 'Send reset link'}
+            </button>
+          </form>
+        )}
 
         <p className="forgot-footer">
           <Link to="/login">Back to login</Link>

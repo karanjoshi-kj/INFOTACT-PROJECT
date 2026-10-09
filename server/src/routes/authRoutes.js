@@ -1,12 +1,88 @@
 const express = require("express");
+const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
 
 const User = require("../models/User");
 const requireAuth = require("../middleware/auth");
+const { isMailConfigured, sendMail } = require("../utils/mailer");
 
 const router = express.Router();
+
+// ---- password reset settings ----
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // link valid for 15 minutes
+const RESET_REQUEST_COOLDOWN_MS = 60 * 1000; // at most one email per minute per account
+const MIN_PASSWORD_LENGTH = 8; // same as the signup form
+const MAX_PASSWORD_LENGTH = 128; // bcrypt only uses the first 72 bytes anyway
+const FORGOT_PASSWORD_MESSAGE =
+  "If an account with that email exists, a password reset link will be sent shortly.";
+
+const hashResetToken = (token) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
+const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const clientUrl = () =>
+  (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/+$/, "");
+
+async function sendResetEmail(user, token) {
+  const resetLink = `${clientUrl()}/reset-password?token=${token}`;
+  const name = user.name || "User";
+  const minutes = RESET_TOKEN_TTL_MS / 60000;
+
+  await sendMail({
+    to: user.email,
+    subject: "SyncDoc - Password Reset",
+    text:
+      `Hello ${name},\n\n` +
+      `We received a request to reset your SyncDoc password.\n\n` +
+      `Reset your password using this link:\n${resetLink}\n\n` +
+      `This link will expire in ${minutes} minutes and can be used only once.\n\n` +
+      `If you did not request a password reset, you can safely ignore this email.\n\n` +
+      `- SyncDoc Team`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>SyncDoc Password Reset</h2>
+
+        <p>Hello ${escapeHtml(name)},</p>
+
+        <p>We received a request to reset your SyncDoc password.</p>
+
+        <p>Click the button below to reset your password:</p>
+
+        <p>
+          <a
+            href="${resetLink}"
+            style="
+              display:inline-block;
+              padding:12px 20px;
+              background:#2563eb;
+              color:#ffffff;
+              text-decoration:none;
+              border-radius:6px;
+            "
+          >
+            Reset Password
+          </a>
+        </p>
+
+        <p>
+          This link will expire in <strong>${minutes} minutes</strong> and can be used only once.
+        </p>
+
+        <p>If you did not request this password reset, you can safely ignore this email.</p>
+
+        <p>- SyncDoc Team</p>
+      </div>
+    `,
+  });
+}
 
 // ==============================
 // SIGNUP
@@ -111,122 +187,84 @@ router.post("/login", async (req, res) => {
 // ==============================
 router.post("/forgot-password", async (req, res) => {
   try {
-    const { email } = req.body;
+    const email =
+      typeof req.body?.email === "string" ? req.body.email.trim() : "";
 
-    const user = await User.findOne({ email });
-
-    // Do not reveal whether the email exists.
-    if (!user) {
-      return res.json({
-        success: true,
-        message:
-          "If an account exists, a password reset link has been sent.",
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter your email address.",
       });
     }
 
-    // Google / GitHub accounts do not have local passwords.
-    if (!user.password) {
-      return res.json({
-        success: true,
+    // A server configuration problem, not account-specific, so it can be
+    // reported without revealing whether the email is registered.
+    if (!isMailConfigured()) {
+      console.error(
+        "Password reset unavailable: the email provider is not configured."
+      );
+      return res.status(503).json({
+        success: false,
         message:
-          "If an account exists, a password reset link has been sent.",
+          "Password reset is temporarily unavailable. Please try again later.",
       });
     }
 
-    // Create a temporary reset token valid for 15 minutes.
-    const resetToken = jwt.sign(
-      {
-        userId: user._id,
-        purpose: "password-reset",
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "15m",
+    const user = await User.findOne({ email }).select("+resetPasswordExpires");
+
+    // Only accounts with a local password can be reset (not Google / GitHub).
+    if (user && user.password) {
+      const lastIssuedAt = user.resetPasswordExpires
+        ? user.resetPasswordExpires.getTime() - RESET_TOKEN_TTL_MS
+        : 0;
+      const tooSoon = Date.now() - lastIssuedAt < RESET_REQUEST_COOLDOWN_MS;
+
+      if (!tooSoon) {
+        // 256 bits of randomness. Only the hash is stored.
+        const token = crypto.randomBytes(32).toString("hex");
+        const tokenHash = hashResetToken(token);
+
+        // A new request replaces any earlier unused token.
+        await User.updateOne(
+          { _id: user._id },
+          {
+            $set: {
+              resetPasswordTokenHash: tokenHash,
+              resetPasswordExpires: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+            },
+          }
+        );
+
+        // Sent in the background so the response time is the same whether or
+        // not the account exists. If sending fails, the unusable token is removed.
+        sendResetEmail(user, token).catch(async (mailErr) => {
+          console.error(
+            "Password reset email could not be sent:",
+            mailErr && (mailErr.code || mailErr.name)
+          );
+          try {
+            await User.updateOne(
+              { _id: user._id, resetPasswordTokenHash: tokenHash },
+              { $unset: { resetPasswordTokenHash: 1, resetPasswordExpires: 1 } }
+            );
+          } catch {
+            // nothing more to do; the token expires on its own
+          }
+        });
       }
-    );
+    }
 
-    const resetLink =
-      `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
-
-    // Gmail transporter
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_APP_PASSWORD,
-      },
-    });
-
-    // Send email
-    await transporter.sendMail({
-      from: `"SyncDoc" <${process.env.MAIL_USER}>`,
-      to: user.email,
-      subject: "SyncDoc - Password Reset",
-      text:
-        `Hello ${user.name || "User"},\n\n` +
-        `We received a request to reset your SyncDoc password.\n\n` +
-        `Reset your password using this link:\n${resetLink}\n\n` +
-        `This link will expire in 15 minutes.\n\n` +
-        `If you did not request a password reset, you can safely ignore this email.\n\n` +
-        `- SyncDoc Team`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-          <h2>SyncDoc Password Reset</h2>
-
-          <p>Hello ${user.name || "User"},</p>
-
-          <p>
-            We received a request to reset your SyncDoc password.
-          </p>
-
-          <p>
-            Click the button below to reset your password:
-          </p>
-
-          <p>
-            <a
-              href="${resetLink}"
-              style="
-                display:inline-block;
-                padding:12px 20px;
-                background:#2563eb;
-                color:#ffffff;
-                text-decoration:none;
-                border-radius:6px;
-              "
-            >
-              Reset Password
-            </a>
-          </p>
-
-          <p>
-            This link will expire in <strong>15 minutes</strong>.
-          </p>
-
-          <p>
-            If you did not request this password reset, you can safely ignore this email.
-          </p>
-
-          <p>
-            - SyncDoc Team
-          </p>
-        </div>
-      `,
-    });
-
-    console.log(`Password reset email sent to: ${user.email}`);
-
+    // Same response for every case, so registered emails cannot be discovered.
     res.json({
       success: true,
-      message:
-        "If an account exists, a password reset link has been sent.",
+      message: FORGOT_PASSWORD_MESSAGE,
     });
   } catch (err) {
-    console.error("Forgot password email error:", err);
+    console.error("Forgot password error:", err && (err.code || err.name));
 
     res.status(500).json({
       success: false,
-      message: "Unable to send password reset email.",
+      message: "Unable to process the request. Please try again later.",
     });
   }
 });
@@ -236,7 +274,20 @@ router.post("/forgot-password", async (req, res) => {
 // ==============================
 router.post("/reset-password", async (req, res) => {
   try {
-    const { token, password } = req.body;
+    const token =
+      typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    const password =
+      typeof req.body?.password === "string" ? req.body.password : "";
+    const confirmPassword =
+      typeof req.body?.confirmPassword === "string"
+        ? req.body.confirmPassword
+        : "";
+
+    const invalidLink = {
+      success: false,
+      message:
+        "This reset link is invalid or has expired. Please request a new one.",
+    };
 
     if (!token || !password) {
       return res.status(400).json({
@@ -245,56 +296,68 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    if (password.length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters long.",
+        message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`,
       });
     }
 
-    let decoded;
-
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (tokenError) {
+    if (password.length > MAX_PASSWORD_LENGTH) {
       return res.status(400).json({
         success: false,
-        message: "Reset link is invalid or expired.",
+        message: `Password must be at most ${MAX_PASSWORD_LENGTH} characters long.`,
       });
     }
 
-    if (decoded.purpose !== "password-reset") {
+    if (password !== confirmPassword) {
       return res.status(400).json({
         success: false,
-        message: "Invalid password reset token.",
+        message: "Passwords do not match.",
       });
     }
 
-    const user = await User.findById(decoded.userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User account not found.",
-      });
+    // Tokens are 64 hex characters; reject anything else without a DB lookup.
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+      return res.status(400).json(invalidLink);
     }
 
+    const tokenHash = hashResetToken(token.toLowerCase());
+    const filter = {
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    };
+
+    // Cheap check first so invalid tokens do not cost a bcrypt hash.
+    const stillValid = await User.exists(filter);
+    if (!stillValid) {
+      return res.status(400).json(invalidLink);
+    }
+
+    // Same hashing method as signup.
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    user.password = hashedPassword;
+    // Atomic: sets the password and removes the token in one operation, so a
+    // token can never be used twice, even by two simultaneous requests.
+    const updatedUser = await User.findOneAndUpdate(filter, {
+      $set: { password: hashedPassword },
+      $unset: { resetPasswordTokenHash: 1, resetPasswordExpires: 1 },
+    });
 
-    await user.save();
+    if (!updatedUser) {
+      return res.status(400).json(invalidLink);
+    }
 
     res.json({
       success: true,
-      message: "Password reset successfully.",
+      message: "Password reset successfully. You can now log in.",
     });
   } catch (err) {
-    console.error("Reset password error:", err);
+    console.error("Reset password error:", err && (err.code || err.name));
 
     res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Unable to reset the password. Please try again later.",
     });
   }
 });
