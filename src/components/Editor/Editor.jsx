@@ -42,7 +42,7 @@ function buildSheetHtml(rows = 6, cols = 5) {
   html += '</tr></thead><tbody>'
   for (let r = 1; r <= rows; r++) {
     html += `<tr><th contenteditable="false">${r}</th>`
-    for (let c = 0; c < cols; c++) html += '<td><br></td>'
+    for (let c = 0; c < cols; c++) html += '<td style="text-align: left"><br></td>'
     html += '</tr>'
   }
   html += '</tbody></table><p><br></p>'
@@ -576,13 +576,51 @@ function describeCell(td) {
 // ---------------------------------------------------------------
 const BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'UL', 'OL', 'PRE', 'TABLE', 'HR', 'BLOCKQUOTE'])
 
-// Loose text typed straight into the editor gets wrapped in a <div> (so it can carry a colour)
-function wrapLooseNodes(root) {
+// A <div> / <p> that holds a spreadsheet or a code block (directly, or inside another such
+// wrapper) is only a CONTAINER. It must never carry an author colour itself, otherwise
+// its colour bar would be painted over the whole spreadsheet / code block whenever anything
+// inside changes. Each cell / code block / text line inside it carries its own colour.
+const isBlockHolder = (node) =>
+  (node.tagName === 'DIV' || node.tagName === 'P') &&
+  Array.from(node.children).some((c) => c.tagName === 'TABLE' || c.tagName === 'PRE' || isBlockHolder(c))
+
+function blockHolders(parent, out = []) {
+  Array.from(parent.children).forEach((node) => {
+    if (isBlockHolder(node)) {
+      out.push(node)
+      blockHolders(node, out)
+    }
+  })
+  return out
+}
+
+// Copy / remove the author mark (id, name, colour) of an element
+function copyStamp(from, to) {
+  ;['data-author', 'data-author-name'].forEach((attr) => {
+    if (from.hasAttribute(attr)) to.setAttribute(attr, from.getAttribute(attr))
+  })
+  if ((from.getAttribute('title') || '').startsWith('Edited by ')) to.setAttribute('title', from.getAttribute('title'))
+  const color = from.style.getPropertyValue('--author-color')
+  if (color) to.style.setProperty('--author-color', color)
+}
+
+function clearStamp(el) {
+  if (!el.hasAttribute('data-author') && !el.style.getPropertyValue('--author-color')) return
+  el.removeAttribute('data-author')
+  el.removeAttribute('data-author-name')
+  if ((el.getAttribute('title') || '').startsWith('Edited by ')) el.removeAttribute('title')
+  el.style.removeProperty('--author-color')
+  if (!el.getAttribute('style')) el.removeAttribute('style')
+}
+
+// Loose text inside `container` gets wrapped in a <div> (so it can carry a colour).
+// `stampFrom`: when the container is a wrapper, its text keeps the mark the wrapper had.
+function wrapLooseIn(container, stampFrom = null) {
   const sel = window.getSelection()
-  const range = sel && sel.rangeCount && root.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null
+  const range = sel && sel.rangeCount && container.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null
   let run = null
   let moved = false
-  Array.from(root.childNodes).forEach((node) => {
+  Array.from(container.childNodes).forEach((node) => {
     if (node.nodeType === 1 && BLOCK_TAGS.has(node.tagName)) {
       run = null
       return
@@ -591,30 +629,56 @@ function wrapLooseNodes(root) {
     if (node.nodeType === 3 && !node.textContent.trim() && !run) return
     if (!run) {
       run = document.createElement('div')
-      root.insertBefore(run, node)
+      if (stampFrom) {
+        copyStamp(stampFrom, run)
+        if (stampFrom.hasAttribute('data-author')) run.keepAuthor = true // moved text, not newly written
+      }
+      container.insertBefore(run, node)
     }
     run.appendChild(node)
     moved = true
   })
-  if (moved && range && range.startContainer !== root && range.endContainer !== root) {
+  if (moved && range && range.startContainer !== container && range.endContainer !== container) {
     sel.removeAllRanges()
     sel.addRange(range)
   }
 }
 
+// Loose text typed straight into the editor gets wrapped in a <div> (so it can carry a colour)
+function wrapLooseNodes(root) {
+  wrapLooseIn(root)
+  // Wrappers around spreadsheets / code blocks: their own text gets its own <div> (keeping
+  // the mark it had), and the wrapper itself stops carrying a colour.
+  blockHolders(root).forEach((holder) => {
+    wrapLooseIn(holder, holder)
+    clearStamp(holder)
+  })
+}
+
 // The pieces of the document that can carry an author colour
-function authorUnits(root) {
-  const out = []
-  Array.from(root.children).forEach((node) => {
+function collectUnits(parent, out) {
+  Array.from(parent.children).forEach((node) => {
     const tag = node.tagName
     if (tag === 'UL' || tag === 'OL') Array.from(node.children).forEach((li) => out.push(li))
     else if (tag === 'TABLE') node.querySelectorAll('td').forEach((td) => out.push(td))
+    else if (isBlockHolder(node)) collectUnits(node, out)
     else if (tag !== 'HR' && tag !== 'BR') out.push(node)
   })
+}
+
+function authorUnits(root) {
+  const out = []
+  collectUnits(root, out)
   return out
 }
 
-const unitSig = (unit) => `${unit.tagName}|${unit.innerHTML}`
+// What a unit "looks like". A spreadsheet cell with a formula is described by its formula,
+// not by the calculated value, so a cell that is only re-calculated (because another cell
+// changed) is not counted as edited.
+const unitSig = (unit) => {
+  if (unit.tagName === 'TD' && unit.dataset && unit.dataset.formula) return `TD|=${unit.dataset.formula}`
+  return `${unit.tagName}|${unit.innerHTML}`
+}
 
 // Turns an image file into a small JPEG data URL so it can live inside the document
 function readImageAsDataUrl(file) {
@@ -812,7 +876,7 @@ function Editor({
 
   const accessRef = useRef(role === 'host' ? 'granted' : 'pending') // 'granted' | 'pending' | 'denied' | 'closed'
   const selfRef = useRef({ id: 'guest', name: 'Guest', color: HOST_COLOR, role: 'host' })
-  const unitSigsRef = useRef([]) // fingerprints of every unit, to see which ones a person changed
+  const unitSigsRef = useRef({ units: [], sigs: [] }) // every unit + its fingerprint, to see which ones a person changed
   const decideRef = useRef(null) // host: (request, allow) => approve / deny a join request
   const notifiedRef = useRef(new Set()) // join requests the host was already told about
 
@@ -851,10 +915,14 @@ function Editor({
   // Remember what every unit looks like right now (after loading / receiving content)
   const snapshotUnits = () => {
     const el = editorRef.current
-    unitSigsRef.current = el ? authorUnits(el).map(unitSig) : []
+    const units = el ? authorUnits(el) : []
+    unitSigsRef.current = { units, sigs: units.map(unitSig) }
   }
 
-  // Stamp the units that changed since the last snapshot with the current person's colour
+  // Stamp the units that changed since the last snapshot with the current person's colour.
+  // Every unit (paragraph, list item, spreadsheet cell, code block...) is judged on its own:
+  // an element that is still the same element with the same content keeps its colour, so
+  // editing one cell never recolours the other cells of the spreadsheet.
   const stampAuthorship = () => {
     const el = editorRef.current
     if (!el) return
@@ -862,32 +930,37 @@ function Editor({
     const sigs = units.map(unitSig)
     const prev = unitSigsRef.current
 
-    let start = 0
-    while (start < sigs.length && start < prev.length && sigs[start] === prev[start]) start++
-    let endCur = sigs.length
-    let endPrev = prev.length
-    while (endCur > start && endPrev > start && sigs[endCur - 1] === prev[endPrev - 1]) {
-      endCur--
-      endPrev--
-    }
+    const before = new Map(prev.units.map((unit, k) => [unit, prev.sigs[k]]))
+    const present = new Set(units)
 
-    const pool = new Map()
-    for (let k = start; k < endPrev; k++) pool.set(prev[k], (pool.get(prev[k]) || 0) + 1)
+    // Content of units that no longer exist: a NEW unit with that same content was only
+    // moved / re-created by the browser (e.g. undo), it was not written by this person.
+    const gone = new Map()
+    prev.units.forEach((unit, k) => {
+      if (!present.has(unit)) gone.set(prev.sigs[k], (gone.get(prev.sigs[k]) || 0) + 1)
+    })
 
     const me = selfRef.current
-    for (let k = start; k < endCur; k++) {
-      const left = pool.get(sigs[k])
-      if (left) {
-        pool.set(sigs[k], left - 1) // this unit only moved, it was not changed
-        continue
+    units.forEach((unit, k) => {
+      if (unit.keepAuthor) {
+        delete unit.keepAuthor // text split out of a wrapper keeps the author it already had
+        return
       }
-      const unit = units[k]
+      if (before.has(unit)) {
+        if (before.get(unit) === sigs[k]) return // untouched: keeps its colour
+      } else {
+        const left = gone.get(sigs[k])
+        if (left) {
+          gone.set(sigs[k], left - 1)
+          return
+        }
+      }
       unit.setAttribute('data-author', me.id)
       unit.setAttribute('data-author-name', me.name)
       unit.setAttribute('title', `Edited by ${me.name}`)
       unit.style.setProperty('--author-color', me.color)
-    }
-    unitSigsRef.current = sigs
+    })
+    unitSigsRef.current = { units, sigs }
   }
 
   // Set up the shared Yjs document + WebSocket connection (again whenever the room changes)
@@ -1589,6 +1662,7 @@ if (el.innerHTML !== cleanHtml) {
   const handleInsertSheet = () => {
     saveSelection()
     insertHtml(buildSheetHtml(6, 5))
+    handleTextAlignChange('left') // a new spreadsheet starts left-aligned (toolbar shows it too)
     notify('Spreadsheet added. Type = in a cell, or use the Formula Bar, e.g. =SUM(A1:A3)')
   }
 
@@ -1612,7 +1686,11 @@ if (el.innerHTML !== cleanHtml) {
       th.setAttribute('contenteditable', 'false')
       th.textContent = String(body.rows.length)
       tr.appendChild(th)
-      for (let i = 1; i < cols; i++) tr.insertCell().innerHTML = '<br>'
+      for (let i = 1; i < cols; i++) {
+        const cell = tr.insertCell()
+        cell.style.textAlign = 'left'
+        cell.innerHTML = '<br>'
+      }
     } else if (action === 'addCol') {
       if (cols - 1 >= 26) {
         notify('A spreadsheet can have at most 26 columns (A-Z)', 'error')
@@ -1623,7 +1701,11 @@ if (el.innerHTML !== cleanHtml) {
       th.setAttribute('contenteditable', 'false')
       th.textContent = colLetter(headRow.cells.length - 1)
       headRow.appendChild(th)
-      for (const row of body.rows) row.insertCell().innerHTML = '<br>'
+      for (const row of body.rows) {
+        const cell = row.insertCell()
+        cell.style.textAlign = 'left'
+        cell.innerHTML = '<br>'
+      }
     }
     handleInput()
   }

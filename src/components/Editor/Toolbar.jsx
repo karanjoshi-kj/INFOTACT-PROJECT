@@ -472,7 +472,7 @@ function Toolbar({
             onClick={() => handleTabChange('photo')}
           >
             <ImageIcon />
-            <span>Photograph</span>
+            <span>Paragraph</span>
           </button>
           <button
             type="button"
