@@ -5,6 +5,7 @@ SyncDoc is a browser-based document editor with private documents and real-time 
 ## Features
 
 - Sign up and log in with email and password; Google and GitHub sign-in are available when configured.
+- Request a password-reset email and set a new password from a time-limited link (requires SMTP configuration).
 - Create, rename, search, organize, and save documents and folders.
 - Edit rich text with formatting, lists, code blocks, images, tables, and spreadsheet-style sheets with formulas.
 - Export documents as PDF.
@@ -34,6 +35,14 @@ JWT_SECRET=replace-with-a-long-random-secret
 PORT=5000
 CLIENT_URL=http://localhost:5173
 
+# Required only for password-reset emails
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@example.com
+SMTP_PASS=your-smtp-password-or-app-password
+MAIL_FROM="SyncDoc <your-email@example.com>"
+
 # Optional: enable Google and GitHub OAuth sign-in
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
@@ -42,6 +51,8 @@ GITHUB_CLIENT_SECRET=
 ```
 
 For MongoDB Atlas, use the connection string provided by Atlas as `MONGO_URI` and make sure the machine running the backend is allowed to connect. Keep real secrets in `.env`; do not commit them.
+
+Password-reset emails require valid SMTP settings. `MAIL_FROM` is optional and defaults to `SMTP_USER`. For Gmail, use an App Password instead of your normal account password. If SMTP is not configured, the backend still starts, but password-reset email requests are unavailable.
 
 Then run:
 
@@ -111,6 +122,8 @@ All routes below are under `/api`.
 | --- | --- |
 | `GET /health` | Backend health check |
 | `/auth` | Signup, login, current user, and optional OAuth |
+| `POST /auth/forgot-password` | Request a password-reset email (SMTP required) |
+| `POST /auth/reset-password` | Set a new password using the emailed token |
 | `/documents` | List, create, read, update, delete, sync acknowledgement, and PDF export |
 | `/folders` | Create, list, update, and delete folders |
 | `/rooms` | Create rooms, request membership, list join requests, and approve or deny members |
